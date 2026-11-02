@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "inspections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "familyId", "order": "ASCENDING" },
+        { "fieldPath": "roundId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "inspection_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "familyId", "order": "ASCENDING" },
+        { "fieldPath": "roundId", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
