@@ -78,3 +78,35 @@ test('staff username metadata may be set only by admin',async()=>{
   await assertFails(setDoc(doc(as('t1'),'users','new_staff'),{...teacher1,username:'f02.teacher'}));
   await assertFails(setDoc(doc(as('admin'),'users','invalid_user'),{...teacher1,username:'n@x'}));
 });
+
+test('only students who missed primary round are eligible in round two',async()=>{
+  // Existing inspection was recorded absent during the first monthly round.
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),'inspections','2026-11__01'),{
+      roundId:'2026-11',studentId:'01',familyId:'F01',status:'not_checked',issueTypes:[],note:'',resolution:'none',
+      createdBy:'t1',updatedBy:'t1',createdAt:now,updatedAt:now,
+    });
+  });
+  const db=as('t1'),record=doc(db,'inspection_round2','2026-11__01');
+  const batch=writeBatch(db);
+  batch.set(record,inspection('01','F01','t1'));
+  batch.set(doc(collection(db,'inspection_round2_events')),{inspectionId:'2026-11__01',roundId:'2026-11',studentId:'01',familyId:'F01',actorUid:'t1',status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp()});
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(getDoc(record));
+  await assertFails(getDoc(doc(as('t2'),'inspection_round2','2026-11__01')));
+  // Student 02 never missed inspection and is in another family.
+  await assertFails(setDoc(doc(db,'inspection_round2','2026-11__02'),inspection('02','F02','t1')));
+});
+test('round-two entry rejected for a student who passed round one',async()=>{
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),'inspections','2026-11__01'),{
+      roundId:'2026-11',studentId:'01',familyId:'F01',status:'pass',issueTypes:[],note:'',resolution:'none',
+      createdBy:'t1',updatedBy:'t1',createdAt:now,updatedAt:now,
+    });
+  });
+  await assertFails(setDoc(doc(as('t1'),'inspection_round2','2026-11__01'),inspection('01','F01','t1')));
+});
+test('admin can archive students but teachers cannot',async()=>{
+  await assertSucceeds(setDoc(doc(as('admin'),'students','01'),{...student('01','F01'),active:false}));
+  await assertFails(setDoc(doc(as('t1'),'students','01'),{...student('01','F01'),active:true}));
+});

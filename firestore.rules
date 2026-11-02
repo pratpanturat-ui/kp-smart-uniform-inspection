@@ -30,8 +30,7 @@ service cloud.firestore {
         && data.keys().hasOnly(['name','email','role','active','familyIds','username'])
         && data.name is string && data.name.size() > 0 && data.name.size() <= 120
         && data.email is string && data.email.size() <= 254
-        && (!('username' in data) ||
-          (data.username is string && data.username.matches('^[a-z][a-z0-9._-]{2,31}$')))
+        && (!('username' in data) || (data.username is string && data.username.matches('^[a-z][a-z0-9._-]{2,31}$')))
         && data.role == 'teacher'
         && data.active is bool && data.familyIds is list
         && data.familyIds.size() <= 21;
@@ -44,11 +43,12 @@ service cloud.firestore {
     }
     function validStudent(data, id) {
       return data.keys().hasAll(['studentId','name','room','familyId'])
-        && data.keys().hasOnly(['studentId','name','room','familyId'])
+        && data.keys().hasOnly(['studentId','name','room','familyId','active'])
         && data.studentId == id
         && data.name is string && data.name.size() > 0 && data.name.size() <= 150
         && data.room is string && data.room.size() > 0 && data.room.size() <= 30
-        && data.familyId is string && data.familyId.size() > 0 && data.familyId.size() <= 30;
+        && data.familyId is string && data.familyId.size() > 0 && data.familyId.size() <= 30
+        && (!('active' in data) || data.active is bool);
     }
     function validRound(data) {
       return data.keys().hasAll(['name','date','status'])
@@ -63,7 +63,15 @@ service cloud.firestore {
     }
     function studentMatches(data) {
       return exists(/databases/$(database)/documents/students/$(data.studentId))
-        && get(/databases/$(database)/documents/students/$(data.studentId)).data.familyId == data.familyId;
+        && get(/databases/$(database)/documents/students/$(data.studentId)).data.familyId == data.familyId
+        && get(/databases/$(database)/documents/students/$(data.studentId)).data.get('active',true) == true;
+    }
+    // Second monthly round: only students explicitly marked 'not_checked'
+    // in the PRIMARY round are eligible. This is not an attendance record.
+    function primaryWasAbsent(data) {
+      return exists(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId))
+        && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.status == 'not_checked'
+        && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.familyId == data.familyId;
     }
     function validInspection(data) {
       return data.keys().hasAll(['roundId','studentId','familyId','status','issueTypes',
@@ -172,6 +180,57 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/inspections/$(request.resource.data.inspectionId)).data.resolution == request.resource.data.resolution
         && getAfter(/databases/$(database)/documents/inspections/$(request.resource.data.inspectionId)).data.issueTypes == request.resource.data.issueTypes
         && getAfter(/databases/$(database)/documents/inspections/$(request.resource.data.inspectionId)).data.note == request.resource.data.note;
+      allow update, delete: if false;
+    }
+
+    // Independent second-pass records preserve the monthly primary results.
+    match /inspection_round2/{inspectionId} {
+      allow read: if memberOf(resource.data.familyId);
+      allow create: if validInspection(request.resource.data)
+        && inspectionId == request.resource.data.roundId + '__' + request.resource.data.studentId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && memberOf(request.resource.data.familyId)
+        && roundOpen(request.resource.data.roundId)
+        && studentMatches(request.resource.data)
+        && primaryWasAbsent(request.resource.data);
+      allow update: if validInspection(request.resource.data)
+        && request.resource.data.roundId == resource.data.roundId
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status','issueTypes','note','resolution','updatedBy','updatedAt'])
+        && memberOf(resource.data.familyId)
+        && roundOpen(resource.data.roundId)
+        && studentMatches(resource.data)
+        && primaryWasAbsent(resource.data);
+      allow delete: if false;
+    }
+
+
+    match /inspection_round2_events/{eventId} {
+      allow read: if memberOf(resource.data.familyId);
+      // Append-only operational change log. For tamper-proof logs, use trusted backend later.
+      allow create: if validEvent(request.resource.data, eventId)
+        && memberOf(request.resource.data.familyId)
+        && roundOpen(request.resource.data.roundId)
+        && primaryWasAbsent(request.resource.data)
+        && existsAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId))
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.updatedBy == request.auth.uid
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.roundId == request.resource.data.roundId
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.studentId == request.resource.data.studentId
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.familyId == request.resource.data.familyId
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.status == request.resource.data.status
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.resolution == request.resource.data.resolution
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.issueTypes == request.resource.data.issueTypes
+        && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.note == request.resource.data.note;
       allow update, delete: if false;
     }
 

@@ -4,16 +4,56 @@
       "collectionGroup": "inspections",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "familyId", "order": "ASCENDING" },
-        { "fieldPath": "roundId", "order": "ASCENDING" }
+        {
+          "fieldPath": "familyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "roundId",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "inspection_events",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "familyId", "order": "ASCENDING" },
-        { "fieldPath": "roundId", "order": "ASCENDING" }
+        {
+          "fieldPath": "familyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "roundId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "inspection_round2",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "familyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "roundId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "inspection_round2_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "familyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "roundId",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

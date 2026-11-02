@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query, where,
-  setDoc, serverTimestamp, writeBatch, runTransaction,
+  setDoc, updateDoc, serverTimestamp, writeBatch, runTransaction,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { inspectionId } from '../utils/domain';
@@ -20,10 +20,10 @@ export function inspectionQuery(profile, roundId, familyId) {
     ? [where('roundId', '==', roundId)]
     : [where('familyId', '==', familyId), where('roundId', '==', roundId)];
 }
-export async function saveInspection({ user, roundId, student, old, status, issueTypes = [], note = '', resolution = 'none' }) {
+export async function saveInspection({ user, roundId, student, old, status, issueTypes = [], note = '', resolution = 'none', phase = 1 }) {
   const key = inspectionId(roundId, student.studentId);
-  const recordRef = doc(db, 'inspections', key);
-  const eventRef = doc(collection(db, 'inspection_events'));
+  const recordRef = doc(db, phase === 2 ? 'inspection_round2' : 'inspections', key);
+  const eventRef = doc(collection(db, phase === 2 ? 'inspection_round2_events' : 'inspection_events'));
   const now = serverTimestamp();
   const record = {
     roundId, studentId: student.studentId, familyId: student.familyId,
@@ -116,4 +116,19 @@ export async function upsertStudents(rows, onProgress) {
 export async function loadInspectorsForRound(roundId) {
   const s = await getDocs(query(collection(db, 'inspections'), where('roundId', '==', roundId)));
   return s.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+/** Only Admin may create/update student information, enforced again in firestore.rules.
+ * Historical inspections remain linked to the immutable studentId.
+ */
+export async function saveStudent(student, active = true) {
+  await setDoc(doc(db, 'students', student.studentId), {
+    studentId: student.studentId, name: student.name.trim(),
+    room: student.room.trim(), familyId: student.familyId,
+    active: Boolean(active),
+  });
+}
+/** Logical deletion: hide from inspection lists without destroying history. */
+export async function setStudentActive(studentId, active) {
+  await updateDoc(doc(db, 'students', studentId), { active: Boolean(active) });
 }
