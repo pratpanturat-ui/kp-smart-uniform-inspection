@@ -6,7 +6,7 @@ import {initializeTestEnvironment, assertFails, assertSucceeds} from '@firebase/
 import {doc, setDoc, getDoc, getDocs, collection, query, where, writeBatch, serverTimestamp} from 'firebase/firestore';
 
 let env;
-const projectId='kp-uniform-rules-test';
+const projectId='demo-kp-uniform-rules-test';
 const path='firestore.rules';
 const now=new Date('2026-11-03T02:00:00.000Z');
 const adminUser={name:'Administrator',email:'admin@example.test',role:'admin',active:true,familyIds:[]};

@@ -21,3 +21,9 @@ jobs:
         run: npm test
       - name: Build web app
         run: npm run build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Test Firestore security rules with emulator
+        run: npm run rules:test
