@@ -25,7 +25,9 @@ beforeEach(async()=>{await env.clearFirestore();await env.withSecurityRulesDisab
   setDoc(doc(db,'inspection_rounds/2026-11'),{name:'พฤศจิกายน 2569',date:'2026-11-03',status:'open'}),
  ]);
 });});
-function as(uid){return env.authenticatedContext(uid).firestore();}
+function as(uid, provider = uid === 'admin' ? 'google.com' : 'password'){
+  return env.authenticatedContext(uid,{firebase:{sign_in_provider:provider}}).firestore();
+}
 function inspection(studentId, familyId, uid){return {roundId:'2026-11',studentId,familyId,status:'pass',issueTypes:[],note:'',resolution:'none',createdBy:uid,createdAt:serverTimestamp(),updatedBy:uid,updatedAt:serverTimestamp()};}
 
 // The tests explicitly verify data isolation even if someone changes a URL or query.
@@ -63,4 +65,16 @@ test('closed rounds block teachers',async()=>{
 test('inactive teacher has no access',async()=>{
   await env.withSecurityRulesDisabled(async ctx=>setDoc(doc(ctx.firestore(),'users/t1'),{...teacher1,active:false}));
   await assertFails(getDoc(doc(as('t1'),'students','01')));
+});
+
+test('admin must authenticate with Google, and teachers with password',async()=>{
+  await assertSucceeds(getDoc(doc(as('admin','google.com'),'students','01')));
+  await assertFails(getDoc(doc(as('admin','password'),'students','01')));
+  await assertSucceeds(getDoc(doc(as('t1','password'),'students','01')));
+  await assertFails(getDoc(doc(as('t1','google.com'),'students','01')));
+});
+test('staff username metadata may be set only by admin',async()=>{
+  await assertSucceeds(setDoc(doc(as('admin'),'users','new_staff'),{...teacher1,username:'f01.teacher'}));
+  await assertFails(setDoc(doc(as('t1'),'users','new_staff'),{...teacher1,username:'f02.teacher'}));
+  await assertFails(setDoc(doc(as('admin'),'users','invalid_user'),{...teacher1,username:'n@x'}));
 });

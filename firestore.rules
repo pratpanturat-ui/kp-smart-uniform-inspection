@@ -12,7 +12,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     function active() {
-      return profileExists() && profile().active == true;
+      return profileExists() && profile().active == true
+        && ((profile().role == 'admin'
+          && request.auth.token.firebase.sign_in_provider == 'google.com')
+          || (profile().role == 'teacher'
+            && request.auth.token.firebase.sign_in_provider == 'password'));
     }
     function admin() {
       return active() && profile().role == 'admin';
@@ -23,9 +27,11 @@ service cloud.firestore {
     }
     function validProfile(data) {
       return data.keys().hasAll(['name','email','role','active','familyIds'])
-        && data.keys().hasOnly(['name','email','role','active','familyIds'])
+        && data.keys().hasOnly(['name','email','role','active','familyIds','username'])
         && data.name is string && data.name.size() > 0 && data.name.size() <= 120
         && data.email is string && data.email.size() <= 254
+        && (!('username' in data) ||
+          (data.username is string && data.username.matches('^[a-z][a-z0-9._-]{2,31}$')))
         && data.role == 'teacher'
         && data.active is bool && data.familyIds is list
         && data.familyIds.size() <= 21;

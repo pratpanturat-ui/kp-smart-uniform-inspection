@@ -72,3 +72,12 @@ flowchart TD
 ### ความเป็นส่วนตัว
 
 ใช้เฉพาะ `studentId`, `name`, `room`, `familyId` และประวัติข้อบกพร่องเกี่ยวกับเครื่องแต่งกาย. ควรกำหนดผู้รับผิดชอบข้อมูล นโยบายการเก็บรักษา ระยะเวลาลบ และการออกรายงานตามหลักการคุ้มครองข้อมูลส่วนบุคคลของโรงเรียน. ไม่เผยแพร่ข้อมูลนักเรียนลง GitHub ไม่ให้บุคคลภายนอกเข้าถึง Dashboard และสำรองข้อมูลอย่างสม่ำเสมอ.
+
+## v0.2 Authentication model (Admin Google / Staff Username + Password)
+
+- Admin signs in with Firebase Google provider (`google.com`) and gets permissions ONLY if manually provisioned as `users/{googleUid}` with `role='admin'` / `active=true`. No email-only authorization bypass.
+- Staff sign in with Username + password; an internal deterministic email `username@staff.kp-uniform.invalid` is derived because Firebase Auth Email/Password requires an email identifier. This address is not a real mailbox and cannot be used for email recovery.
+- Admin creates staff Auth identities using **a separate in-memory Firebase Auth instance**, then creates the `users/{uid}` profile through the normal Admin session. A failed profile write triggers best-effort cleanup of the new Auth identity. No password is written into Firestore.
+- New Firestore Rules explicitly require `request.auth.token.firebase.sign_in_provider` to be `google.com` for Admin and `password` for teachers, plus an active allowed profile and KP Family membership.
+- Caveat: Firebase client-side Email/Password `signUp` is public. Outsiders can create Auth-only accounts but have no data access without an Admin-granted Firestore profile. To *restrict credential provisioning itself* (and allow secure credential resets), move provisioning to a trusted backend with Firebase Admin SDK and server-side token verification.
+- Cloudflare Workers Static Assets is currently hosting the site. No service account or admin access token is included in client code. Deploy Firestore Rules separately via Firebase Console/CLI before handling real student data.

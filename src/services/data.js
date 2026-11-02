@@ -55,6 +55,7 @@ export async function updateRound(roundId, name, date, status = 'open') {
 export async function updateTeacher(uid, user) {
   await setDoc(doc(db, 'users', uid.trim()), {
     name: user.name.trim(), email: user.email.trim(), role: 'teacher',
+    ...(user.username ? { username: user.username.trim().toLowerCase() } : {}),
     active: Boolean(user.active), familyIds: user.familyIds,
   });
 }

@@ -1,15 +1,17 @@
-# KP Smart Uniform Inspection (MVP v0.1)
+# KP Smart Uniform Inspection (MVP v0.2)
 
 **ระบบตรวจเครื่องแต่งกาย โรงเรียนคีรีราษฎร์พัฒนา**  
-React 19 + Vite 7 + Tailwind CSS 4 + Firebase Authentication (Email/Password) + Cloud Firestore + Cloudflare Pages + GitHub.
+React 19 + Vite 7 + Tailwind CSS 4 + Firebase Authentication (Google สำหรับ Admin / Username+Password สำหรับครู) + Cloud Firestore + Cloudflare Pages + GitHub.
 
-> ซอร์สโค้ดถูกจัดเตรียมสำหรับ Repository `pratpanturat-ui/kp-smart-uniform-inspection` **ยังไม่ได้เชื่อม Firebase จริงหรือ Deploy ขึ้น Cloudflare** และยังไม่ได้ทดสอบ Firestore Emulator. ห้ามนำไปใช้งานจริงจนกว่าจะทดสอบ Security Rules สำเร็จ
+> GitHub และ Cloudflare Workers Deploy แล้ว แต่ **การติดตั้ง Firestore Security Rules และการสร้าง Admin ยังต้องดำเนินการผ่าน Firebase Console**. ห้ามนำข้อมูลนักเรียนจริงเข้าใช้งานก่อนทดสอบ Rules ให้ผ่าน
 > **คำเตือน:** Repository ที่สร้างครั้งแรกมีสถานะ Public; ควรเปลี่ยนเป็น **Private** ก่อนนำข้อมูลบุคลากรหรือข้อมูลนักเรียนใด ๆ มาใช้ และห้าม Commit ข้อมูลนักเรียนจริงหรือ service account
 
 ## ความสามารถเวอร์ชันนี้
 
-- ลงชื่อเข้าใช้ด้วย Email/Password ส่วนบุคคล ผ่าน Firebase Authentication ไม่มีหน้าให้สมัครเอง
-- Admin คนแรกหนึ่งบัญชี (bootstrap ผ่าน Firebase Console) จัดการครู ครอบครัว รอบตรวจ และนำเข้า CSV นักเรียน
+- Admin เข้าผ่าน Google (Gmail) เท่านั้น โดยต้องมีเอกสาร users/{UID} role=admin ใน Firestore
+- ครูเข้าสู่ระบบด้วย Username + Password ส่วนบุคคล (ไม่ต้องมี Gmail ของครู) โดยระบบแปลง Username เป็นอีเมลภายในสำหรับ Firebase Auth
+- Admin สร้าง Username และรหัสผ่านเริ่มต้นให้ครูผ่านหน้าเว็บ ใช้ Firebase Auth instance แยกจากเซสชัน Admin
+- Admin คนแรกหนึ่งบัญชี (Sign in with Google แล้ว bootstrap role ผ่าน Firebase Console) จัดการครู ครอบครัว รอบตรวจ และนำเข้า CSV นักเรียน
 - ครูเห็นเฉพาะนักเรียนและผลตรวจของ KP Family ที่กำหนดใน `users/{uid}.familyIds` โดย Security Rules บังคับฝั่ง Firestore
 - ตรวจตามครอบครัว: ผ่าน / ต้องแก้ไข (หลายข้อ) / ไม่ได้ตรวจ (ไม่ใช่สถานะขาดเรียน)
 - หนึ่งเอกสารผลตรวจต่อหนึ่งนักเรียนต่อหนึ่งรอบ; อัปเดตซ้ำได้ ไม่เพิ่มจำนวนผลตรวจซ้ำ
@@ -34,7 +36,7 @@ npm run dev
 ## 2) สร้าง Firebase project
 
 1. ไปที่ [Firebase Console](https://console.firebase.google.com/) เลือก `Add project` ชื่อเช่น `kp-smart-uniform`.
-2. เลือก `Build > Authentication > Sign-in method > Email/Password` แล้วกด Enable. **อย่าเปิดวิธีอื่นหากยังไม่ต้องการ**.
+2. เลือก `Build > Authentication > Sign-in method` แล้วเปิด **Google** สำหรับ Admin และ **Email/Password** สำหรับครู จากนั้น Save. เว็บไซต์ Cloudflare ต้องอยู่ใน Authorized domains ด้วย.
 3. เลือก `Build > Firestore Database > Create database` เลือก location ที่เหมาะสม (แก้ region ภายหลังไม่ได้ง่าย) และสร้างแบบ **Production mode** ห้ามตั้ง Allow All.
 4. ไปที่ `Project settings > Your apps > Web > Add app` แล้วคัดลอก `firebaseConfig` ค่ามาใส่ `.env`:
 
@@ -70,8 +72,8 @@ npm run rules:test
 
 ## 4) สร้าง Admin คนแรก (Bootstrap)
 
-1. Firebase Console > Authentication > Users > **Add user** ใส่อีเมลและรหัสผ่านส่วนบุคคลที่คาดเดายากของ Admin.
-2. คัดลอก `User UID` (ไม่ใช่อีเมล).
+1. เปิดเว็บไซต์ แล้วเลือก **ผู้ดูแลระบบ → เข้าสู่ระบบด้วย Google** และลงชื่อเข้าใช้ด้วย Gmail ของคุณ จะได้บัญชี Firebase Auth แต่ยังไม่มีสิทธิ์จนกว่าจะตั้งค่า users/{uid} ใน Firestore.
+2. เปิด Firebase Console > Authentication > Users แล้วคัดลอก `User UID` ของบัญชีที่เพิ่งเข้าสู่ระบบด้วย Google (ไม่ใช่อีเมล).
 3. Firestore Database > Start collection > ชื่อ `users` > Document ID = **UID ของ Admin**.
 4. เพิ่ม Field ด้านล่างด้วยชนิดข้อมูลให้ถูกต้อง:
 
@@ -103,8 +105,12 @@ studentId,name,room,familyId
 
 สามารถแปลง Excel เป็น CSV UTF-8 โดยใช้ Excel > Save As > `CSV UTF-8` (รักษาศูนย์นำหน้ารหัสนักเรียนโดยตั้งคอลัมน์เป็น Text ก่อนเปิด/แก้ไขไฟล์). อย่าใช้ข้อมูลจริงใน source code หรือ public repository.
 
-4. **สิทธิ์ครู** > Firebase Authentication > Users > Add user (ทำทีละคน) > คัดลอก UID > หน้า Admin > ใส่ UID ชื่อครู อีเมล และเลือก KP Family ที่รับผิดชอบ. ต้องสร้างบัญชีใน Firebase Auth และเอกสาร `users/{uid}` จึงจะเข้าสู่ระบบสำเร็จ.
-5. ครูแต่ละคนล็อกอินตรวจด้วยรหัสผ่านเฉพาะบุคคล.
+4. **สิทธิ์ครู** > กรอกชื่อครู, Username เช่น `f01.teacher`, รหัสผ่านเริ่มต้น (อย่างน้อย 10 ตัว), เลือก KP Family แล้วกด **สร้าง Username และ Password ให้ครู**. การสร้างใช้ Firebase Authentication instance แยก ไม่ทำให้ Admin หลุดจากระบบ. เมื่อครูมีบัญชีแล้ว Admin สามารถแก้ครอบครัวและระงับสิทธิ์ใน Firestore ได้.
+5. ครูแต่ละคนเลือกแท็บ “ครูผู้บันทึก” กรอก Username และรหัสผ่านเฉพาะบุคคล ไม่ต้องใช้ Gmail. เมื่อปิดสิทธิ์ `active=false` จะอ่าน/เขียนข้อมูลไม่ได้ แม้ Firebase Auth จะยังมีบัญชีอยู่.
+
+**ข้อจำกัดสำคัญ v0.2:** Firebase Auth Web API อนุญาตสร้างบัญชี Email/Password จาก Client ได้โดยธรรมชาติ ถึงแม้หน้าเว็บไม่มีปุ่มสมัครเอง บุคคลภายนอกอาจสร้างบัญชี Auth ที่ **ไม่มีสิทธิ์** ได้ แต่ Firestore Rules จะป้องกันไม่ให้เข้าถึงข้อมูลนักเรียนจนกว่า Admin จะสร้างเอกสาร `users/{uid}`. หากต้องการบังคับว่าเฉพาะ Admin เท่านั้นที่สร้าง/รีเซ็ตบัญชี Auth ได้จริง ต้องพัฒนา Backend ที่เชื่อถือได้ด้วย Admin SDK (เช่น Cloudflare Worker ที่ตรวจ Firebase ID token และเก็บ Service Account ใน Secret). ยังไม่ได้ทำใน v0.2. การเปลี่ยนรหัสผ่านเดิมต้องทำผ่านกระบวนการผู้ดูแลที่ปลอดภัย ไม่สามารถส่งอีเมลรีเซ็ตไปยังอีเมลภายใน `.invalid` ได้.
+
+**ข้อสำคัญ:** Username ครูถูกแปลงเป็น `username@staff.kp-uniform.invalid` เพื่อใช้ Firebase Email/Password เท่านั้น ไม่ใช่กล่องจดหมายที่ใช้งานได้. ไม่ให้ครูนำอีเมลนี้ไปใช้กู้รหัสผ่าน.
 
 **ข้อจำกัด CSV:** นักเรียนที่ไม่มีในไฟล์ใหม่จะยังอยู่ในฐานข้อมูล, การอัปเดตครอบครัวของนักเรียนอาจทำให้สิทธิ์การเห็นประวัติเก่าต้องตรวจทานเป็นรายกรณี. ควรยืนยันโอนย้ายนักเรียน/ครอบครัวกับฝ่ายกิจการนักเรียนก่อนทำการนำเข้ารอบใหม่.
 
@@ -113,6 +119,7 @@ studentId,name,room,familyId
 ```text
 users/{firebaseAuthUid}
   name, email, role: 'admin' | 'teacher', active, familyIds: ['F01', ...]
+  username: 'f01.teacher' (เฉพาะครูที่สร้างด้วยระบบใหม่)
 families/{familyId}
   name, active
 students/{studentId}
@@ -178,10 +185,21 @@ Cloudflare Pages ใช้ HTTPS และมี build ใหม่เมื่�
 4. เพิ่มการออกบัญชีครูด้วย backend Admin SDK แบบปลอดภัย โดยไม่ส่ง service account ไปยังเว็บ
 5. บันทึก audit log โดย backend และรองรับประวัติย้ายครอบครัว
 
-**หมายเหตุ:** การลงชื่อเข้าใช้ด้วย Email/Password ไม่ได้หมายความว่าระบบเก็บรหัสผ่านเป็นข้อความธรรมดา รหัสผ่านจัดการโดย Firebase Authentication. ที่หน้าเว็บไม่มีปุ่มสมัครเอง แต่ Firebase Auth API ของโครงการยังสามารถรองรับการสร้างบัญชีหากไม่ได้จำกัดด้วยมาตรการฝั่ง backend; บัญชีที่ไม่มีโปรไฟล์ role แบบ active จะอ่าน/เขียนข้อมูลภายในไม่ได้ตาม Firestore Rules.
+**หมายเหตุ:** การลงชื่อเข้าใช้ด้วย Email/Password ไม่ได้หมายความว่าระบบเก็บรหัสผ่านเป็นข้อความธรรมดา รหัสผ่านจัดการโดย Firebase Authentication. ที่หน้าเว็บไม่มีปุ่มสมัครเอง แต่ Firebase Auth API ของโครงการยังรองรับการสร้างบัญชีแบบไม่มีสิทธิ์หากไม่ได้จำกัดด้วยมาตรการฝั่ง backend; บัญชีที่ไม่มีโปรไฟล์ role แบบ active จะอ่าน/เขียนข้อมูลภายในไม่ได้ตาม Firestore Rules.
 
 **การคงประวัติข้อบกพร่อง:** หากบันทึกว่า `ต้องแก้ไข` แล้ว ปุ่ม `ผ่าน` และ `ไม่ได้ตรวจ` สำหรับรายชื่อนั้นจะถูกปิดไว้ เพื่อให้แก้ไขผ่านหน้า `ติดตามการแก้ไข` ก่อน ไม่ทำให้ประวัติที่พบหายไปโดยกดผิด. หากบันทึกผิดตั้งแต่แรก ผู้ดูแลระบบต้องตรวจสอบและแก้ไขจากเครื่องมือผู้ดูแลฐานข้อมูลที่ได้รับอนุญาต.
 
 ## 11) GitHub Actions CI
 
 เมื่ออัปโหลดไฟล์ขึ้น GitHub จะมีไฟล์ `.github/workflows/verify.yml` รัน `npm install`, `npm test` และ `npm run build` ใน GitHub Actions โดยอัตโนมัติเมื่อ push ไปยัง `main` หรือมี Pull Request. การตรวจสอบนี้ยัง **ไม่รวม** Firestore Emulator/security rules และไม่ถือว่าเป็นการตรวจความปลอดภัย production แบบสมบูรณ์.
+
+## 12) อัปเกรดจาก v0.1 เป็น v0.2 — Admin Google และ Username ครู
+
+1. Firebase Authentication > Sign-in method: เปิด **Google** และ **Email/Password**
+2. Firebase Authentication > Settings > Authorized domains: เพิ่มโดเมน Cloudflare Workers หากยังไม่ได้เพิ่ม
+3. ติดตั้งไฟล์ **firestore.rules เวอร์ชันใหม่**: Rules ใหม่กำหนด Admin ต้อง sign-in provider `google.com` และครูต้อง `password` จึงเข้า Firestore ได้. **ห้ามอาศัยแค่เปลี่ยนหน้าเว็บ**
+4. ไปที่หน้าเว็บ เลือกแท็บผู้ดูแลระบบและเข้าสู่ระบบด้วย Gmail จริงของ Admin. จากนั้นใน Firebase Console > Authentication > Users คัดลอก UID ของบัญชีนั้น แล้วตั้ง Firestore `users/{UID}` ด้วย role `admin`, active `true`, familyIds `[]`
+5. กลับไป Login อีกครั้ง จากหน้า Admin > สิทธิ์ครู สร้าง username/password และกำหนด KP Family
+6. ทดสอบครู F01 ว่าเห็น F01 เท่านั้น ทดสอบ Google อื่นที่ไม่มี role admin ว่าเข้า Admin ไม่ได้ และทดสอบรหัสผ่านครูผิด/บัญชีที่ถูกระงับ
+
+รหัสผ่านและ Gmail ส่วนตัว **ห้ามใส่ในโค้ด, GitHub หรือข้อความแชต**.

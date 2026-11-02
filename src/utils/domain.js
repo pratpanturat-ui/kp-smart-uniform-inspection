@@ -44,6 +44,11 @@ export function summarize(students, inspections) {
 export function prettyError(error) {
   const code = error?.code || '';
   if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'].includes(code)) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+  if (code === 'auth/email-already-in-use') return 'Username นี้ถูกใช้งานแล้ว กรุณาเลือกชื่ออื่น';
+  if (code === 'auth/operation-not-allowed') return 'กรุณาเปิด Google และ Email/Password ใน Firebase Authentication ก่อน';
+  if (code === 'auth/popup-closed-by-user') return 'ปิดหน้าต่างเข้าสู่ระบบ Google ก่อนลงชื่อเข้าใช้สำเร็จ';
+  if (code === 'auth/popup-blocked') return 'เบราว์เซอร์บล็อกหน้าต่าง Google Login กรุณาอนุญาต Popup';
+  if (code === 'auth/unauthorized-domain') return 'เพิ่มโดเมน Workers ของโรงเรียนใน Firebase Authentication → Authorized domains';
   if (code === 'auth/too-many-requests') return 'เข้าสู่ระบบผิดหลายครั้ง กรุณาลองใหม่ภายหลัง';
   if (code === 'permission-denied') return 'ไม่มีสิทธิ์ดำเนินการนี้ หรือรอบตรวจปิดแล้ว';
   if (code === 'failed-precondition') return 'Firestore ยังไม่มีดัชนีสำหรับคำค้นนี้ กรุณาติดตั้ง firestore.indexes.json';

@@ -5,11 +5,13 @@ import {
   ChevronDown, Plus, X, Check, Save, BookOpen, LockKeyhole, Shirt, LoaderCircle,
   RefreshCw, FileSpreadsheet, Eye, AlertTriangle, Menu, ArrowLeft,
 } from 'lucide-react';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, onSnapshot, where } from 'firebase/firestore';
 import { auth, configured, db } from './services/firebase';
 import { getFamilyDocuments, inspectionQuery, saveInspection, updateFamily, updateRound,
   updateTeacher, upsertStudents, watchCollection } from './services/data';
+import { createStaffAccount } from './services/staff-users';
+import { usernameToEmail, validateUsername, validateStaffPassword } from './utils/staff-auth';
 import { ISSUE_TYPES, STATUS_META, prettyError, summarize, normalizeStudent, validateStudent } from './utils/domain';
 import { parseCSV, saveText, toCSV } from './utils/csv';
 
@@ -37,11 +39,18 @@ function Toast({ text, clear }) {
   </div>;
 }
 function Login() {
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
+  const [mode,setMode] = useState('admin');
+  const [username, setUsername] = useState(''); const [password, setPassword] = useState('');
   const [pending,setPending] = useState(false); const [error,setError] = useState('');
-  async function submit(e) {
+  async function staffSignIn(e) {
     e.preventDefault(); setError(''); setPending(true);
-    try { await signInWithEmailAndPassword(auth, email.trim(), password); }
+    try { await signInWithEmailAndPassword(auth, usernameToEmail(username), password); }
+    catch (err) { setError(prettyError(err)); }
+    finally { setPending(false); }
+  }
+  async function adminSignIn() {
+    setError(''); setPending(true);
+    try { await signInWithPopup(auth, new GoogleAuthProvider()); }
     catch (err) { setError(prettyError(err)); }
     finally { setPending(false); }
   }
@@ -49,16 +58,26 @@ function Login() {
     <div className="login-brand"><div className="brand-logo"><Shirt className="size-7" /></div><strong>KP SMART</strong><span>STUDENT AFFAIRS</span></div>
     <div className="login-panel"><div className="login-symbol"><ShieldCheck className="size-7"/></div>
       <p className="eyebrow">โรงเรียนคีรีราษฎร์พัฒนา</p><h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-2">เข้าสู่ระบบ</h1>
-      <p className="text-slate-500 mb-7">ระบบตรวจเครื่องแต่งกายนักเรียนตาม KP Family</p>
-      <form onSubmit={submit} className="space-y-4">
-        <label className="block"><span className="form-label">อีเมลของครู</span><input className={baseInput} type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="teacher@school.ac.th" /></label>
-        <label className="block"><span className="form-label">รหัสผ่านส่วนบุคคล</span><input className={baseInput} type="password" autoComplete="current-password" required minLength={6} value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"/></label>
+      <p className="text-slate-500 mb-5">ระบบตรวจเครื่องแต่งกายนักเรียนตาม KP Family</p>
+      <div className="auth-mode-tabs" role="group" aria-label="ประเภทผู้ใช้">
+        <button type="button" className={mode==='admin'?'auth-mode-active':''} onClick={()=>{setMode('admin');setError('');}}>ผู้ดูแลระบบ</button>
+        <button type="button" className={mode==='staff'?'auth-mode-active':''} onClick={()=>{setMode('staff');setError('');}}>ครูผู้บันทึก</button>
+      </div>
+      {mode==='admin'?<div>
+        <p className="text-sm text-slate-600 mb-5 leading-relaxed">เฉพาะ Admin ที่ได้รับสิทธิ์ในระบบ เข้าใช้งานด้วยบัญชี Google (Gmail) ของตนเอง</p>
+        <ErrorText>{error}</ErrorText>
+        <button type="button" disabled={pending} onClick={adminSignIn} className={cn(primaryButton,'w-full justify-center h-12')}>
+          {pending?<LoaderCircle className="animate-spin size-4"/>:<ShieldCheck className="size-4"/>} เข้าสู่ระบบด้วย Google
+        </button>
+      </div>:<form onSubmit={staffSignIn} className="space-y-4">
+        <label className="block"><span className="form-label">ชื่อผู้ใช้ (Username)</span><input className={baseInput} type="text" autoCapitalize="none" spellCheck="false" autoComplete="username" required value={username} onChange={e=>setUsername(e.target.value)} placeholder="เช่น f01.teacher" /></label>
+        <label className="block"><span className="form-label">รหัสผ่านที่ได้รับจาก Admin</span><input className={baseInput} type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••••"/></label>
         <ErrorText>{error}</ErrorText>
         <button disabled={pending} className={cn(primaryButton,'w-full justify-center h-12')}>{pending ? <LoaderCircle className="animate-spin size-4"/> : <LockKeyhole className="size-4"/>} เข้าสู่ระบบ</button>
-      </form>
-      <p className="text-xs text-slate-500 mt-6 leading-relaxed text-center">เฉพาะครูที่ได้รับบัญชีจากผู้ดูแลระบบเท่านั้น หากลืมรหัสผ่าน โปรดติดต่อผู้ดูแลระบบ</p>
+      </form>}
+      <p className="text-xs text-slate-500 mt-6 leading-relaxed text-center">เฉพาะผู้ที่ได้รับสิทธิ์จากผู้ดูแลระบบเท่านั้น หากลืมรหัสผ่าน กรุณาติดต่อ Admin</p>
     </div>
-    <div className="login-footer">KP Smart Uniform Inspection · Version 0.1</div>
+    <div className="login-footer">KP Smart Uniform Inspection · Version 0.2</div>
   </div>;
 }
 function MissingProfile({ email }) {
@@ -103,7 +122,7 @@ function AppShell() {
   const [menuOpen,setMenuOpen] = useState(false);
   const isAdmin = profile?.role === 'admin';
   const showToast = (message,type = 'success') => setToast({ message,type });
-  useEffect(()=>{ if (!configured || !auth) { setFirebaseUser(null); return; } return onAuthStateChanged(auth, user=>setFirebaseUser(user)); }, []);
+  useEffect(()=>{ if (!configured || !auth) { setFirebaseUser(null); return; } return onAuthStateChanged(auth, user=>{setProfile(undefined);setFirebaseUser(user);}); }, []);
   useEffect(()=>{
     if (!firebaseUser) { setProfile(undefined); return; }
     return onSnapshot(doc(db,'users',firebaseUser.uid), snap=>setProfile(snap.exists()? snap.data() : null),()=>setProfile(null));
@@ -283,14 +302,48 @@ function RoundsAdmin({rounds,notify}) {
     <div className="table-scroll mt-5"><table><thead><tr><th>รหัส</th><th>ชื่อรอบ</th><th>วันที่</th><th>สถานะ</th><th></th></tr></thead><tbody>{[...rounds].sort((a,b)=>b.date.localeCompare(a.date)).map(r=><tr key={r.id}><td>{r.id}</td><td>{r.name}</td><td>{r.date}</td><td><Badge kind={r.status==='open'?'pass':'neutral'}>{r.status==='open'?'เปิด':'ปิด'}</Badge></td><td><button className="text-button" onClick={()=>{setId(r.id);setName(r.name);setDate(r.date);setStatus(r.status);}}>แก้ไข</button></td></tr>)}</tbody></table></div></section>;
 }
 function TeachersAdmin({teachers,families,notify}) {
-  const [uid,setUid] = useState('');const [name,setName]=useState('');const [email,setEmail]=useState('');
-  const [familyIds,setFamilyIds] = useState([]);const [active,setActive] = useState(true);const [busy,setBusy]=useState(false);
-  function load(t){setUid(t.id);setName(t.name);setEmail(t.email);setFamilyIds(t.familyIds||[]);setActive(t.active);}
-  async function submit(e){e.preventDefault();setBusy(true);try{if(!uid.trim())throw Error('กรุณาคัดลอก UID จาก Firebase Authentication');if(!familyIds.length)throw Error('ต้องกำหนดครอบครัวที่ครูรับผิดชอบอย่างน้อย 1 ครอบครัว');await updateTeacher(uid,{name,email,familyIds,active});notify('บันทึกสิทธิ์ครูเรียบร้อย');setUid('');setName('');setEmail('');setFamilyIds([]);}catch(err){notify(prettyError(err),'error');}finally{setBusy(false);}}
-  return <section className="card card-pad"><div className="card-title"><div><h2>กำหนดสิทธิ์ครูผู้ตรวจ</h2><p className="text-sm text-slate-500 mt-1">สร้าง Email/Password ใน Firebase Authentication ก่อน แล้วนำ UID มากำหนดสิทธิ์</p></div></div><div className="note-line mt-4"><LockKeyhole className="size-4 shrink-0"/> ไม่เก็บรหัสผ่านใน Firestore และไม่อนุญาตให้ครูสร้างบัญชีด้วยตนเองผ่านหน้าเว็บ</div>
-    <form onSubmit={submit} className="mt-5 space-y-4"><div className="form-grid"><label><span className="form-label">Authentication UID</span><input className="field" value={uid} onChange={e=>setUid(e.target.value)} placeholder="คัดลอก UID จาก Firebase Console" required/></label><label><span className="form-label">ชื่อครู</span><input className="field" value={name} onChange={e=>setName(e.target.value)} required placeholder="ชื่อ-นามสกุล"/></label><label><span className="form-label">อีเมลบัญชี</span><input className="field" type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="email@example.com"/></label><label className="flex items-center gap-2 mt-6"><input type="checkbox" checked={active} onChange={e=>setActive(e.target.checked)}/> เปิดสิทธิ์ใช้งาน</label></div>
-    <div><span className="form-label">KP Family ที่รับผิดชอบ</span><div className="family-checks">{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><label key={f.id} className="check-tile"><input type="checkbox" checked={familyIds.includes(f.id)} onChange={()=>setFamilyIds(v=>v.includes(f.id)?v.filter(x=>x!==f.id):[...v,f.id])}/>{f.id} · {f.name}</label>)}</div></div><button disabled={busy} className="btn btn-primary"><Save className="size-4"/> บันทึกสิทธิ์ครู</button></form>
-    <div className="table-scroll mt-7"><table><thead><tr><th>ชื่อครู</th><th>อีเมล</th><th>ครอบครัว</th><th>สถานะ</th><th></th></tr></thead><tbody>{teachers.map(t=><tr key={t.id}><td className="font-semibold">{t.name}</td><td>{t.email||'-'}</td><td>{t.role==='admin'?'ทั้งหมด':(t.familyIds||[]).join(', ')}</td><td><Badge kind={t.active?'pass':'neutral'}>{t.active?'ใช้งาน':'ปิด'}</Badge></td><td>{t.role==='teacher'&&<button className="text-button" onClick={()=>load(t)}>แก้ไข</button>}</td></tr>)}</tbody></table></div></section>;
+  const [uid,setUid] = useState(''); const [username,setUsername] = useState('');
+  const [password,setPassword] = useState(''); const [name,setName]=useState('');
+  const [email,setEmail]=useState(''); const [familyIds,setFamilyIds] = useState([]);
+  const [active,setActive] = useState(true); const [busy,setBusy]=useState(false);
+  const editing = Boolean(uid);
+  function reset(){setUid('');setUsername('');setPassword('');setName('');setEmail('');setFamilyIds([]);setActive(true);}
+  function load(t){setUid(t.id);setUsername(t.username||'');setPassword('');setName(t.name);setEmail(t.email);setFamilyIds(t.familyIds||[]);setActive(t.active);}
+  async function submit(e){
+    e.preventDefault();setBusy(true);
+    try {
+      if(!familyIds.length)throw Error('ต้องกำหนดครอบครัวที่ครูรับผิดชอบอย่างน้อย 1 ครอบครัว');
+      if (!editing) {
+        const usernameError=validateUsername(username), passwordError=validateStaffPassword(password);
+        if (usernameError) throw Error(usernameError);
+        if (passwordError) throw Error(passwordError);
+        await createStaffAccount({username,password,name,familyIds});
+        notify(`สร้างบัญชีครู ${username.toLowerCase()} และกำหนดสิทธิ์เรียบร้อย`);
+      } else {
+        await updateTeacher(uid,{name,email,username:username||undefined,familyIds,active});
+        notify('ปรับสิทธิ์ครูเรียบร้อย');
+      }
+      reset();
+    }catch(err){notify(prettyError(err),'error');}
+    finally{setBusy(false);}
+  }
+  return <section className="card card-pad">
+    <div className="card-title"><div><h2>จัดการบัญชีครูผู้บันทึก</h2><p className="text-sm text-slate-500 mt-1">คุณกำหนด Username, Password และ KP Family ได้จากหน้านี้ โดยไม่ต้องสร้าง Gmail ให้ครู</p></div>{editing&&<button type="button" className="btn btn-outline" onClick={reset}>สร้างบัญชีใหม่</button>}</div>
+    <div className="note-line mt-4"><LockKeyhole className="size-4 shrink-0"/> รหัสผ่านจัดเก็บและตรวจสอบโดย Firebase Authentication ไม่แสดงในตารางหรือบันทึกใน Firestore</div>
+    <form onSubmit={submit} className="mt-5 space-y-4">
+      <div className="form-grid">
+        <label><span className="form-label">ชื่อครู</span><input className="field" value={name} onChange={e=>setName(e.target.value)} required placeholder="ชื่อ-นามสกุล"/></label>
+        <label><span className="form-label">Username {editing&&'(แก้ไขไม่ได้)'}</span><input className="field" autoCapitalize="none" spellCheck="false" value={username} onChange={e=>setUsername(e.target.value)} required={!editing} readOnly={editing} placeholder="เช่น f01.teacher"/></label>
+        {!editing?<label><span className="form-label">รหัสผ่านเริ่มต้น (อย่างน้อย 10 ตัว)</span><input className="field" type="password" autoComplete="new-password" minLength={10} maxLength={128} required value={password} onChange={e=>setPassword(e.target.value)} placeholder="กำหนดรหัสผ่านให้ครู"/></label>
+          :<label><span className="form-label">บัญชี Firebase (ไม่เปลี่ยนจากหน้านี้)</span><input className="field" value={email} readOnly/></label>}
+        <label className="flex items-center gap-2 mt-6"><input type="checkbox" checked={active} disabled={!editing} onChange={e=>setActive(e.target.checked)}/> เปิดสิทธิ์ใช้งาน {(!editing)&&'(เปิดอัตโนมัติ)'}</label>
+      </div>
+      <div><span className="form-label">KP Family ที่รับผิดชอบ</span><div className="family-checks">{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><label key={f.id} className="check-tile"><input type="checkbox" checked={familyIds.includes(f.id)} onChange={()=>setFamilyIds(v=>v.includes(f.id)?v.filter(x=>x!==f.id):[...v,f.id])}/>{f.id} · {f.name}</label>)}</div></div>
+      <button disabled={busy} className="btn btn-primary">{busy?<LoaderCircle className="animate-spin size-4"/>:<Save className="size-4"/>}{editing?'บันทึกการแก้ไขสิทธิ์':'สร้าง Username และ Password ให้ครู'}</button>
+    </form>
+    <p className="text-xs text-amber-700 mt-5 leading-relaxed">ในเวอร์ชันนี้ Admin สร้างบัญชีและกำหนดรหัสผ่านเริ่มต้นได้ แต่การเปลี่ยน/รีเซ็ตรหัสผ่านของบัญชีเดิมต้องจัดการผ่านระบบผู้ดูแล Firebase หรือเพิ่ม Backend ที่ปลอดภัยในระยะต่อไป ห้ามเก็บรหัสผ่านไว้ในเอกสารนักเรียน</p>
+    <div className="table-scroll mt-7"><table><thead><tr><th>ชื่อครู</th><th>Username</th><th>ครอบครัว</th><th>สถานะ</th><th></th></tr></thead><tbody>{teachers.map(t=><tr key={t.id}><td className="font-semibold">{t.name}</td><td>{t.role==='admin'?'Google (Admin)':t.username||'(บัญชีเดิม)'}</td><td>{t.role==='admin'?'ทั้งหมด':(t.familyIds||[]).join(', ')}</td><td><Badge kind={t.active?'pass':'neutral'}>{t.active?'ใช้งาน':'ปิด'}</Badge></td><td>{t.role==='teacher'&&<button className="text-button" onClick={()=>load(t)}>แก้ไข</button>}</td></tr>)}</tbody></table></div>
+  </section>;
 }
 function StudentsAdmin({students,families,notify}) {
   const [preview,setPreview] = useState([]); const [errors,setErrors] = useState([]); const [busy,setBusy] = useState(false);
