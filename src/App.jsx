@@ -8,9 +8,10 @@ import {
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, onSnapshot, where } from 'firebase/firestore';
 import { auth, configured, db } from './services/firebase';
-import { getFamilyDocuments, inspectionQuery, saveInspection, updateFamily, updateRound,
+import { getFamilyDocuments, inspectionQuery, saveInspection, updateFamily, ensureOfficialFamilies, updateRound,
   updateTeacher, upsertStudents, watchCollection } from './services/data';
 import { createStaffAccount } from './services/staff-users';
+import { OFFICIAL_FAMILIES, missingOrPlaceholderFamilies } from './data/family-config';
 import { usernameToEmail, validateUsername, validateStaffPassword } from './utils/staff-auth';
 import { ISSUE_TYPES, STATUS_META, prettyError, summarize, normalizeStudent, validateStudent } from './utils/domain';
 import { parseCSV, saveText, toCSV } from './utils/csv';
@@ -132,9 +133,25 @@ function AppShell() {
     setLoading(true);
     const unsubRounds = watchCollection('inspection_rounds',[],setRounds,err=>showToast(prettyError(err),'error'));
     let unsubFamilies = ()=>{};
-    if (isAdmin) unsubFamilies = watchCollection('families',[],setFamilies,err=>showToast(prettyError(err),'error'));
-    else getFamilyDocuments(profile.familyIds || []).then(setFamilies).catch(err=>showToast(prettyError(err),'error'));
-    return ()=>{unsubRounds();unsubFamilies();};
+    let bootstrapChecked = false;
+    let disposed = false;
+    if (isAdmin) {
+      unsubFamilies = watchCollection('families', [], rows => {
+        setFamilies(rows);
+        // First confirmed server snapshot only; never seed from initial empty React state.
+        if (bootstrapChecked) return;
+        bootstrapChecked = true;
+        const pending = missingOrPlaceholderFamilies(rows);
+        if (!pending.length) return;
+        ensureOfficialFamilies(pending).then(result => {
+          if (!disposed && result.created + result.renamedPlaceholders > 0)
+            showToast(`เพิ่ม/ปรับชื่อ KP Family อัตโนมัติแล้ว ${result.created + result.renamedPlaceholders} ครอบครัว`);
+        }).catch(error => {
+          if (!disposed) showToast(`นำเข้าครอบครัวอัตโนมัติไม่สำเร็จ: ${prettyError(error)}`, 'error');
+        });
+      }, error => showToast(prettyError(error), 'error'));
+    } else getFamilyDocuments(profile.familyIds || []).then(setFamilies).catch(err=>showToast(prettyError(err),'error'));
+    return ()=>{disposed = true;unsubRounds();unsubFamilies();};
   },[profile?.active,profile?.role,JSON.stringify(profile?.familyIds || [])]);
   useEffect(()=>{
     if (!profile?.active || !families.length) return;
@@ -288,8 +305,8 @@ function Admin({families,rounds,teachers,students,notify}) {
 function FamiliesAdmin({families,notify}) {
   const [id,setId] = useState(''); const [name,setName] = useState(''); const [busy,setBusy] = useState(false);
   async function save(e) {e.preventDefault();setBusy(true);try {const key=id.trim().toUpperCase();if(!/^[A-Z0-9_-]{1,30}$/.test(key)) throw Error('รหัสครอบครัวควรเป็น F01, F02 ...');await updateFamily(key,name);setId('');setName('');notify('บันทึกครอบครัวเรียบร้อย');}catch(err){notify(prettyError(err),'error');}finally{setBusy(false);}}
-  async function seed() {setBusy(true);try {for(let i=1;i<=21;i++){const key=`F${String(i).padStart(2,'0')}`;if(!families.find(f=>f.id===key)) await updateFamily(key,i===13?'วิชาดี':`ครอบครัว ${key}`);}notify('เพิ่มครอบครัว F01–F21 แล้ว (แก้ไขชื่อให้ตรงกับข้อมูลจริง)');}catch(err){notify(prettyError(err),'error');}finally{setBusy(false);}}
-  return <section className="card card-pad"><div className="card-title"><div><h2>จัดการ KP Family</h2><p className="text-sm text-slate-500 mt-1">สร้าง 21 ครอบครัว แล้วตั้งชื่อจริงตามบัญชีปัจจุบัน</p></div><button className="btn btn-outline" onClick={seed} disabled={busy}><Plus className="size-4"/> สร้าง F01–F21</button></div>
+  async function seed() {setBusy(true);try {const pending=missingOrPlaceholderFamilies(families);const result=await ensureOfficialFamilies(pending);notify(result.created+result.renamedPlaceholders?`เพิ่ม/ปรับชื่อ ${result.created+result.renamedPlaceholders} ครอบครัวเรียบร้อย`:'มีข้อมูลครอบครัวครบแล้ว ไม่ได้เขียนทับชื่อที่ตั้งไว้');}catch(err){notify(prettyError(err),'error');}finally{setBusy(false);}}
+  return <section className="card card-pad"><div className="card-title"><div><h2>จัดการ KP Family</h2><p className="text-sm text-slate-500 mt-1">ระบบเติมรายชื่อจริง F01–F21 อัตโนมัติเมื่อ Admin เข้าสู่ระบบ โดยไม่เขียนทับชื่อที่แก้ไขเอง</p></div><button className="btn btn-outline" onClick={seed} disabled={busy}><RefreshCw className="size-4"/> ตรวจสอบ/เติมชื่อครอบครัว</button></div>
     <form onSubmit={save} className="form-grid mt-5"><label><span className="form-label">รหัสครอบครัว</span><input className="field" placeholder="F01" required value={id} onChange={e=>setId(e.target.value)} maxLength={30}/></label><label><span className="form-label">ชื่อครอบครัว</span><input className="field" placeholder="ชื่อครอบครัว" required value={name} onChange={e=>setName(e.target.value)}/></label><button className="btn btn-primary self-end" disabled={busy}><Save className="size-4"/> บันทึก</button></form>
     <div className="table-scroll mt-5"><table><thead><tr><th>รหัส</th><th>ชื่อครอบครัว</th><th>สถานะ</th><th></th></tr></thead><tbody>{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><tr key={f.id}><td className="font-semibold">{f.id}</td><td>{f.name}</td><td><Badge kind={f.active?'pass':'neutral'}>{f.active?'ใช้งาน':'ปิด'}</Badge></td><td><button className="text-button" onClick={()=>{setId(f.id);setName(f.name);}}>แก้ไข</button></td></tr>)}</tbody></table></div>
   </section>;

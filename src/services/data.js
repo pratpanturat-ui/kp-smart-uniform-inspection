@@ -1,9 +1,10 @@
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query, where,
-  setDoc, serverTimestamp, writeBatch,
+  setDoc, serverTimestamp, writeBatch, runTransaction,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { inspectionId } from '../utils/domain';
+import { OFFICIAL_FAMILIES } from '../data/family-config';
 
 export function watchCollection(name, clauses, callback, onError) {
   return onSnapshot(clauses.length ? query(collection(db, name), ...clauses) : collection(db, name),
@@ -46,6 +47,43 @@ export async function saveInspection({ user, roundId, student, old, status, issu
   });
   await batch.commit();
 }
+/**
+ * Idempotent initialization for the 21 official KP Family labels.
+ * Invoked only AFTER the ADMIN has authenticated and the families listener succeeds.
+ * Creates missing entries and replaces only generated placeholders. Never overwrites
+ * an existing custom name or active flag. Transactions protect concurrent sessions.
+ * Split into groups of seven to avoid large batched permission-rule checks.
+ */
+export async function ensureOfficialFamilies(families = OFFICIAL_FAMILIES) {
+  let created = 0;
+  let renamedPlaceholders = 0;
+  for (let offset = 0; offset < families.length; offset += 7) {
+    const chunk = families.slice(offset, offset + 7);
+    const result = await runTransaction(db, async transaction => {
+      // Firestore transactions require ALL reads before writes.
+      const documents = await Promise.all(chunk.map(f => transaction.get(doc(db, 'families', f.id))));
+      let added = 0;
+      let updated = 0;
+      for (let i = 0; i < chunk.length; i++) {
+        const family = chunk[i];
+        const snapshot = documents[i];
+        const ref = doc(db, 'families', family.id);
+        if (!snapshot.exists()) {
+          transaction.set(ref, { name: family.name, active: true });
+          added++;
+        } else if (snapshot.data().name === `ครอบครัว ${family.id}`) {
+          transaction.update(ref, { name: family.name });
+          updated++;
+        }
+      }
+      return { added, updated };
+    });
+    created += result.added;
+    renamedPlaceholders += result.updated;
+  }
+  return { created, renamedPlaceholders };
+}
+
 export async function updateFamily(familyId, name, active = true) {
   await setDoc(doc(db, 'families', familyId), { name: name.trim(), active });
 }
