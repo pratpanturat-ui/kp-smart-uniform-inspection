@@ -82,7 +82,7 @@ test('staff username metadata may be set only by admin',async()=>{
   await assertFails(setDoc(doc(as('admin'),'users','invalid_user'),{...teacher1,username:'n@x'}));
 });
 
-test('only students who missed primary round are eligible in round two',async()=>{
+test('students absent from primary round are eligible in round two',async()=>{
   // Existing inspection was recorded absent during the first monthly round.
   await env.withSecurityRulesDisabled(async ctx=>{
     await setDoc(doc(ctx.firestore(),'inspections','2026-11__01'),{
@@ -124,4 +124,51 @@ test('teachers can manage students and rounds, while account management remains 
   await assertSucceeds(setDoc(doc(as('t1'),'families','F03'),{name:'F03',active:true}));
   await assertSucceeds(setDoc(doc(as('t1'),'inspection_rounds','2026-12'),{name:'December',date:'2026-12-01',status:'open'}));
   await assertFails(setDoc(doc(as('t1'),'users','t2'),{...teacher2,active:false}));
+});
+
+
+test('teacher may inspect a student who failed round one, without overwriting original failure',async()=>{
+  const initial={
+    roundId:'2026-11',studentId:'01',familyId:'F01',status:'issue',issueTypes:['hair','shirt'],
+    note:'ต้องแก้ไขชุดนักเรียน',resolution:'pending',createdBy:'t1',updatedBy:'t1',createdAt:now,updatedAt:now,
+  };
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),'inspections','2026-11__01'),initial);
+  });
+  const db=as('t1'); const batch=writeBatch(db);
+  batch.set(doc(db,'inspection_round2','2026-11__01'),inspection('01','F01','t1'));
+  batch.set(doc(collection(db,'inspection_round2_events')),{
+    inspectionId:'2026-11__01',roundId:'2026-11',studentId:'01',familyId:'F01',
+    actorUid:'t1',status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp(),
+  });
+  await assertSucceeds(batch.commit());
+  assert.equal((await getDoc(doc(db,'inspection_round2','2026-11__01'))).data().status,'pass');
+  const original=(await getDoc(doc(db,'inspections','2026-11__01'))).data();
+  assert.equal(original.status,'issue');
+  assert.deepEqual(original.issueTypes,['hair','shirt']);
+});
+
+test('round-two result can change from failed to passed after a follow-up inspection',async()=>{
+  const primary={roundId:'2026-11',studentId:'01',familyId:'F01',status:'issue',issueTypes:['shoes'],
+    note:'รองเท้าผิดระเบียบ',resolution:'pending',createdBy:'t1',updatedBy:'t1',createdAt:now,updatedAt:now};
+  const roundTwo={...primary,createdBy:'t2',updatedBy:'t2'};
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),'inspections','2026-11__01'),primary);
+    await setDoc(doc(ctx.firestore(),'inspection_round2','2026-11__01'),roundTwo);
+  });
+  const db=as('t1'), batch=writeBatch(db);
+  batch.update(doc(db,'inspection_round2','2026-11__01'),{
+    status:'pass',issueTypes:[],note:'',resolution:'none',updatedBy:'t1',updatedAt:serverTimestamp(),
+  });
+  batch.set(doc(collection(db,'inspection_round2_events')),{
+    inspectionId:'2026-11__01',roundId:'2026-11',studentId:'01',familyId:'F01',
+    actorUid:'t1',status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp(),
+  });
+  await assertSucceeds(batch.commit());
+  assert.equal((await getDoc(doc(db,'inspection_round2','2026-11__01'))).data().status,'pass');
+  assert.equal((await getDoc(doc(db,'inspections','2026-11__01'))).data().status,'issue');
+});
+
+test('student without any first-round inspection is not eligible for round two',async()=>{
+  await assertFails(setDoc(doc(as('t1'),'inspection_round2','2026-11__01'),inspection('01','F01','t1')));
 });

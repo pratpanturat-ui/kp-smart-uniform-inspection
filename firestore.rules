@@ -63,11 +63,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/students/$(data.studentId)).data.familyId == data.familyId
         && get(/databases/$(database)/documents/students/$(data.studentId)).data.get('active',true) == true;
     }
-    // Second monthly round: only students explicitly marked 'not_checked'
-    // in the PRIMARY round are eligible. This is not an attendance record.
-    function primaryWasAbsent(data) {
+    // Second monthly round: students marked 'issue' (failed) or
+    // 'not_checked' (absent) in the PRIMARY round are eligible.
+    function primaryNeedsRecheck(data) {
       return exists(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId))
-        && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.status == 'not_checked'
+        && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.status in ['issue', 'not_checked']
         && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.familyId == data.familyId;
     }
     function validInspection(data) {
@@ -192,7 +192,7 @@ service cloud.firestore {
         && active()
         && roundOpen(request.resource.data.roundId)
         && studentMatches(request.resource.data)
-        && primaryWasAbsent(request.resource.data);
+        && primaryNeedsRecheck(request.resource.data);
       allow update: if validInspection(request.resource.data)
         && request.resource.data.roundId == resource.data.roundId
         && request.resource.data.studentId == resource.data.studentId
@@ -206,7 +206,7 @@ service cloud.firestore {
         && active()
         && roundOpen(resource.data.roundId)
         && studentMatches(resource.data)
-        && primaryWasAbsent(resource.data);
+        && primaryNeedsRecheck(resource.data);
       allow delete: if false;
     }
 
@@ -217,7 +217,7 @@ service cloud.firestore {
       allow create: if validEvent(request.resource.data, eventId)
         && active()
         && roundOpen(request.resource.data.roundId)
-        && primaryWasAbsent(request.resource.data)
+        && primaryNeedsRecheck(request.resource.data)
         && existsAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId))
         && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.updatedBy == request.auth.uid
         && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.updatedAt == request.time

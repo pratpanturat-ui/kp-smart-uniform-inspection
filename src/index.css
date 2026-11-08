@@ -73,3 +73,10 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .roster-access-notice strong{font-size:14px;display:block;margin-bottom:4px;color:#7f4d12}
 .roster-access-notice a{color:#185ba5;display:inline-block;margin-top:8px;font-weight:700;text-decoration:underline}
 @media(max-width:640px){.roster-access-notice{font-size:13px;padding:14px 12px}}
+
+/* Clear first-round context when inspecting again on small screens. */
+.mobile-primary-result { margin: 0.15rem 0 0.75rem; border-radius: 0.8rem; padding: 0.65rem 0.8rem; display: flex; flex-wrap: wrap; column-gap: 0.65rem; row-gap: 0.2rem; font-size: 0.82rem; line-height: 1.5; }
+.mobile-primary-result strong { font-weight: 750; }
+.mobile-primary-failed { background: #fff0ed; color: #943c32; }
+.mobile-primary-absent { background: #f1f5f9; color: #475569; }
+.mobile-primary-result span { width: 100%; }

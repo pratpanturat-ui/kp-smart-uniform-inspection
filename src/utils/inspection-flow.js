@@ -1,6 +1,6 @@
-/** Month-specific second-round eligibility. Round two never replaces round-one records. */
+/** Round two covers first-round failures and absence, without overwriting first-round records. */
 export function secondRoundEligible(primary) {
-  return primary?.status === 'not_checked';
+  return primary?.status === 'not_checked' || primary?.status === 'issue';
 }
 export function secondRoundCandidates(students, primaryByStudent) {
   return students.filter(s => s.active !== false && secondRoundEligible(primaryByStudent[s.studentId]));

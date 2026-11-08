@@ -16,7 +16,7 @@ import { OFFICIAL_FAMILIES, missingOrPlaceholderFamilies } from './data/family-c
 import { usernameToEmail, validateUsername, validateStaffPassword } from './utils/staff-auth';
 import { ISSUE_TYPES, STATUS_META, prettyError, summarize, normalizeStudent, validateStudent } from './utils/domain';
 import { parseCSV, saveText, toCSV } from './utils/csv';
-import { secondRoundCandidates, inspectionProgress } from './utils/inspection-flow';
+import { secondRoundEligible, secondRoundCandidates, inspectionProgress } from './utils/inspection-flow';
 
 const cn = (...names) => names.filter(Boolean).join(' ');
 const primaryButton = 'btn btn-primary';
@@ -80,7 +80,7 @@ function Login() {
       </form>}
       <p className="text-xs text-slate-500 mt-6 leading-relaxed text-center">เฉพาะผู้ที่ได้รับสิทธิ์จากผู้ดูแลระบบเท่านั้น หากลืมรหัสผ่าน กรุณาติดต่อ Admin</p>
     </div>
-    <div className="login-footer">KP Smart Uniform Inspection · Version 0.3</div>
+    <div className="login-footer">KP Smart Uniform Inspection · Version 0.4.2</div>
   </div>;
 }
 function MissingProfile({ email }) {
@@ -219,9 +219,9 @@ function AppShell() {
     if (!selectedRound) return showToast('กรุณาเลือกรอบตรวจก่อน','error');
     setSavingId(student.studentId);
     try {
-      if (phase===2 && records[student.studentId]?.status !== 'not_checked') throw Error('ตรวจรอบ 2 ได้เฉพาะนักเรียนที่ไม่มาในรอบแรก');
+      if (phase===2 && !secondRoundEligible(records[student.studentId])) throw Error('ตรวจรอบ 2 ได้เฉพาะนักเรียนที่ไม่ผ่านหรือไม่มาในรอบแรก');
       const original = phase === 2 ? roundTwoRecords[student.studentId] : records[student.studentId];
-      if (original?.status==='issue' && changes.status!=='issue') throw Error('นักเรียนที่ไม่ผ่านต้องใช้เมนูติดตามการแก้ไข');
+      if (phase===1 && original?.status==='issue' && changes.status!=='issue') throw Error('นักเรียนที่ไม่ผ่านต้องใช้เมนูติดตามการแก้ไข');
       await saveInspection({user:firebaseUser,roundId:selectedRound,student,old:original,phase,...changes});
       setIssueStudent(null); showToast(`บันทึกผลตรวจ ${student.name} เรียบร้อย`);
     } catch(err) { showToast(prettyError(err),'error'); }
@@ -262,7 +262,7 @@ function AppShell() {
     <div className="content-area"><header className="topbar"><button className="icon-button mobile-menu" onClick={()=>setMenuOpen(true)} aria-label="เปิดเมนู"><Menu className="size-5"/></button><div className="topbar-school"><div className="school-mark"><ShieldCheck className="size-5"/></div><div><strong>โรงเรียนคีรีราษฎร์พัฒนา</strong><span>ระบบงานกิจการนักเรียน · KP Family</span></div></div>
       <div className="topbar-user"><span className="status-dot"/> <span className="hidden sm:inline">{profile.name}</span><Badge kind={isAdmin?'navy':'neutral'}>{isAdmin?'ADMIN':'TEACHER'}</Badge></div></header>
       <main className="main-content">
-        <div className="page-heading"><div><p className="eyebrow">KP SMART UNIFORM INSPECTION</p><h1>{nav.find(n=>n.id===tab)?.label}</h1><p className="page-desc">{tab==='overview'?'สรุปผลการตรวจและติดตามความเรียบร้อยของนักเรียน':tab==='inspection'?'เลือกครอบครัวและตรวจรายชื่อด้วยปุ่มขนาดใหญ่':tab==='round2'?'ตรวจเฉพาะนักเรียนที่ไม่มาในรอบแรกของเดือน':tab==='followup'?'ดูแลนักเรียนและติดตามการแก้ไขข้อบกพร่อง':tab==='students'?'เพิ่ม แก้ไข และลบรายชื่อนักเรียน':'จัดการข้อมูลครอบครัว รอบตรวจ และสิทธิ์ครู'}</p></div>
+        <div className="page-heading"><div><p className="eyebrow">KP SMART UNIFORM INSPECTION</p><h1>{nav.find(n=>n.id===tab)?.label}</h1><p className="page-desc">{tab==='overview'?'สรุปผลการตรวจและติดตามความเรียบร้อยของนักเรียน':tab==='inspection'?'เลือกครอบครัวและตรวจรายชื่อด้วยปุ่มขนาดใหญ่':tab==='round2'?'ติดตามนักเรียนที่ไม่ผ่านหรือไม่มาในรอบแรกของเดือน':tab==='followup'?'ดูแลนักเรียนและติดตามการแก้ไขข้อบกพร่อง':tab==='students'?'เพิ่ม แก้ไข และลบรายชื่อนักเรียน':'จัดการข้อมูลครอบครัว รอบตรวจ และสิทธิ์ครู'}</p></div>
           {!['admin','students'].includes(tab) && <button className="btn btn-outline print-button" onClick={exportReport} disabled={!selectedRound}><Download className="size-4"/> ส่งออก CSV</button>}
         </div>
         {!['admin','students'].includes(tab) && <div className="filter-panel"><div className="filter-cell"><label>รอบตรวจ</label><div className="select-wrap"><CalendarDays className="size-4"/><select className="field" value={selectedRound} onChange={e=>setSelectedRound(e.target.value)}><option value="">เลือกรอบตรวจ</option>{[...rounds].sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option value={r.id} key={r.id}>{r.name} · {r.status==='open'?'เปิด':'ปิด'}</option>)}</select><ChevronDown className="select-chevron"/></div></div>
@@ -320,13 +320,15 @@ function Inspection({phase,families,allStudents,students,records,primaryRecords,
   if (!activeFamily) {
     const firstById = Object.fromEntries(allPrimaryRecords.map(r=>[r.studentId,r]));
     return <section className="family-selector">
-      <div className="family-selector-heading"><div><p className="eyebrow">เลือกรายชื่อเพื่อตรวจ</p><h2>{inRound2?'ตรวจรอบที่ 2 — นักเรียนไม่มา':'เลือก KP Family'}</h2><p>{inRound2?'รายการรอบสองดึงจากนักเรียนที่ไม่มาในรอบแรกของเดือนที่เลือก':'แตะปุ่มครอบครัวด้านล่าง เพื่อเปิดรายชื่อนักเรียน'}</p></div><Badge kind="navy">{families.length} ครอบครัว</Badge></div>
+      <div className="family-selector-heading"><div><p className="eyebrow">เลือกรายชื่อเพื่อตรวจ</p><h2>{inRound2?'ตรวจรอบที่ 2 — ไม่ผ่าน / ไม่มา':'เลือก KP Family'}</h2><p>{inRound2?'รายการรอบสองรวมนักเรียนที่ไม่ผ่านและไม่มาในรอบแรกของเดือนที่เลือก':'แตะปุ่มครอบครัวด้านล่าง เพื่อเปิดรายชื่อนักเรียน'}</p></div><Badge kind="navy">{families.length} ครอบครัว</Badge></div>
       <div className="family-tile-grid">{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>{
         const familyStudents=allStudents.filter(s=>s.familyId===f.id);
-        const eligible=inRound2?familyStudents.filter(s=>firstById[s.studentId]?.status==='not_checked'):familyStudents;
+        const eligible=inRound2?secondRoundCandidates(familyStudents,firstById):familyStudents;
+        const failed=eligible.filter(s=>firstById[s.studentId]?.status==='issue').length;
+        const absent=eligible.filter(s=>firstById[s.studentId]?.status==='not_checked').length;
         return <button type="button" key={f.id} className="family-square" onClick={()=>onSelectFamily(f.id)}>
           <span className="family-square-code">{f.id}</span><span className="family-square-name">{f.name}</span>
-          <span className="family-square-meta">{inRound2?'ไม่มารอบแรก':'นักเรียน'} {eligible.length} คน <ArrowRight className="size-4"/></span>
+          <span className="family-square-meta">{inRound2?`รอบ 2 ${eligible.length} คน · ไม่ผ่าน ${failed} · ไม่มา ${absent}`:`นักเรียน ${eligible.length} คน`} <ArrowRight className="size-4"/></span>
         </button>;
       })}</div>
       {!families.length&&<Empty title="ยังไม่มี KP Family" detail="ติดต่อ Admin เพื่อกำหนดครอบครัวที่รับผิดชอบ" icon={Users}/>}
@@ -344,23 +346,28 @@ function Inspection({phase,families,allStudents,students,records,primaryRecords,
   });
   return <section className="inspection-workspace">
     <div className="inspection-backline"><button className="btn btn-outline" onClick={onBack}><ArrowLeft className="size-4"/> กลับเลือกครอบครัว</button><Badge kind={roundOpen?'pass':'neutral'}>{roundOpen?'รอบเปิดตรวจ':'ปิดรอบ'}</Badge></div>
-    <div className="inspection-title-card"><p className="eyebrow">{inRound2?'ตรวจรอบที่ 2':'ตรวจรอบที่ 1'} · {activeFamily}</p><h2>{familyMap[activeFamily]||activeFamily}</h2><p>{inRound2?'เฉพาะผู้ที่กด “ไม่มา” ในรอบแรก — ไม่เปลี่ยนผลรอบแรก':'เลือกสถานะใต้ชื่อนักเรียน ระบบบันทึกทันทีเมื่อกด'}</p>
+    <div className="inspection-title-card"><p className="eyebrow">{inRound2?'ตรวจรอบที่ 2':'ตรวจรอบที่ 1'} · {activeFamily}</p><h2>{familyMap[activeFamily]||activeFamily}</h2><p>{inRound2?'นักเรียนที่ไม่ผ่านหรือไม่มาในรอบแรก — ผลรอบ 2 บันทึกแยก ไม่เปลี่ยนผลรอบแรก':'เลือกสถานะใต้ชื่อนักเรียน ระบบบันทึกทันทีเมื่อกด'}</p>
       <div className="inspection-mini-stats"><span>ทั้งหมด <b>{progress.total}</b></span><span>ผ่าน <b>{progress.pass}</b></span><span>ไม่ผ่าน <b>{progress.issue}</b></span><span>ไม่มา <b>{progress.absent}</b></span><span>รอตรวจ <b>{progress.uninspected}</b></span></div>
     </div>
     {!roundOpen&&<div className="warning-banner"><AlertTriangle className="size-4 shrink-0"/>รอบตรวจนี้ปิดแล้ว ต้องเปิดรอบก่อนบันทึกผล</div>}
     <div className="inspection-search"><Search className="size-5"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="ค้นหาชื่อ / ห้อง / รหัสนักเรียน" aria-label="ค้นหานักเรียน"/></div>
-    <div className="inspection-status-tabs">{[{id:'all',label:'ทั้งหมด'},{id:'uninspected',label:'ยังไม่ตรวจ'},{id:'pass',label:'ผ่าน'},{id:'issue',label:'ไม่ผ่าน'},{id:'absent',label:'ไม่มา'}].map(t=><button key={t.id} className={statusFilter===t.id?'selected':''} onClick={()=>setStatusFilter(t.id)}>{t.label}</button>)}</div>
+    <div className="inspection-status-tabs">{[{id:'all',label:'ทั้งหมด'},{id:'uninspected',label:'ยังไม่ตรวจ'},{id:'pass',label:inRound2?'ผ่านรอบ 2':'ผ่าน'},{id:'issue',label:inRound2?'ไม่ผ่านรอบ 2':'ไม่ผ่าน'},{id:'absent',label:inRound2?'ไม่มารอบ 2':'ไม่มา'}].map(t=><button key={t.id} className={statusFilter===t.id?'selected':''} onClick={()=>setStatusFilter(t.id)}>{t.label}</button>)}</div>
     <div className="mobile-student-list">{filtered.map((s,index)=>{const r=records[s.studentId],st=r?.status,busy=pendingId===s.studentId;
       return <article className="mobile-student-card" key={s.studentId}>
         <div className="mobile-student-head"><div className="mobile-student-avatar">{String(index+1).padStart(2,'0')}</div><div className="mobile-student-info"><strong>{s.name}</strong><small>{s.room} · รหัส {s.studentId}</small></div><Badge kind={st?STATUS_META[st]?.badge||'neutral':'neutral'}>{st==='not_checked'?'ไม่มา':st==='issue'?'ไม่ผ่าน':st==='pass'?'ผ่าน':'รอตรวจ'}</Badge></div>
+        {inRound2&&<div className={cn('mobile-primary-result',primaryRecords[s.studentId]?.status==='issue'?'mobile-primary-failed':'mobile-primary-absent')}>
+          <strong>ผลรอบแรก: {primaryRecords[s.studentId]?.status==='issue'?'ไม่ผ่าน':'ไม่มา'}</strong>
+          {primaryRecords[s.studentId]?.status==='issue'&&<span>สาเหตุ: {(primaryRecords[s.studentId]?.issueTypes||[]).map(id=>ISSUE_TYPES.find(t=>t.id===id)?.label||id).join(' · ')||'ไม่ได้ระบุสาเหตุ'}</span>}
+          {primaryRecords[s.studentId]?.note&&<span>หมายเหตุ: {primaryRecords[s.studentId].note}</span>}
+        </div>}
         {st==='issue'&&<p className="mobile-issue-reasons">ไม่ผ่าน: {(r.issueTypes||[]).map(id=>ISSUE_TYPES.find(t=>t.id===id)?.label||id).join(' · ')} {r.resolution==='resolved'?'· แก้ไขแล้ว':''}</p>}
         <div className="mobile-student-buttons">
-          <button type="button" disabled={!roundOpen||busy||st==='issue'} className={cn('mobile-check-button mobile-check-pass',st==='pass'&&'chosen')} onClick={()=>onQuick(s,{status:'pass',resolution:'none'},phase)}>{busy?<LoaderCircle className="size-5 animate-spin"/>:<Check className="size-5"/>} ผ่าน</button>
+          <button type="button" disabled={!roundOpen||busy||(phase===1 && st==='issue')} className={cn('mobile-check-button mobile-check-pass',st==='pass'&&'chosen')} onClick={()=>onQuick(s,{status:'pass',resolution:'none'},phase)}>{busy?<LoaderCircle className="size-5 animate-spin"/>:<Check className="size-5"/>} ผ่าน</button>
           <button type="button" disabled={!roundOpen||busy} className={cn('mobile-check-button mobile-check-issue',st==='issue'&&'chosen')} onClick={()=>onIssue(s)}><X className="size-5"/> ไม่ผ่าน</button>
           <button type="button" disabled={!roundOpen||busy||st==='issue'} className={cn('mobile-check-button mobile-check-absent',st==='not_checked'&&'chosen')} onClick={()=>onQuick(s,{status:'not_checked',resolution:'none'},phase)}><Clock3 className="size-5"/> ไม่มา</button>
         </div>
       </article>;
-    })}{!filtered.length&&<Empty title={inRound2&&candidates.length===0?'ไม่มีนักเรียนที่ต้องตรวจรอบ 2':'ไม่มีรายชื่อตามเงื่อนไข'} detail={inRound2&&candidates.length===0?'เมื่อนักเรียนถูกบันทึกว่า “ไม่มา” ในรอบแรก รายชื่อจะปรากฏที่นี่อัตโนมัติ':'ลองเปลี่ยนตัวกรองหรือคำค้นหา'} icon={CheckCircle2}/>}</div>
+    })}{!filtered.length&&<Empty title={inRound2&&candidates.length===0?'ไม่มีนักเรียนที่ต้องตรวจรอบ 2':'ไม่มีรายชื่อตามเงื่อนไข'} detail={inRound2&&candidates.length===0?'นักเรียนที่บันทึกว่า “ไม่ผ่าน” หรือ “ไม่มา” ในรอบแรกของเดือนนี้จะปรากฏที่นี่อัตโนมัติ':'ลองเปลี่ยนตัวกรองหรือคำค้นหา'} icon={CheckCircle2}/>}</div>
     <div className="inspection-note"><AlertCircle className="size-4"/> “ไม่มา” หมายถึงไม่อยู่ให้ตรวจเครื่องแต่งกายในรอบนั้น ไม่ใช่การบันทึกขาดเรียนในระบบสแกนหน้า</div>
   </section>;
 }
