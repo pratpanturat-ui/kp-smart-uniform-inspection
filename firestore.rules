@@ -21,10 +21,7 @@ service cloud.firestore {
     function admin() {
       return active() && profile().role == 'admin';
     }
-    function memberOf(familyId) {
-      return active() && (profile().role == 'admin' ||
-        (profile().role == 'teacher' && familyId in profile().familyIds));
-    }
+    // All active Admin/teacher accounts can work with every KP Family.
     function validProfile(data) {
       return data.keys().hasAll(['name','email','role','active','familyIds'])
         && data.keys().hasOnly(['name','email','role','active','familyIds','username'])
@@ -120,32 +117,32 @@ service cloud.firestore {
     }
 
     match /families/{familyId} {
-      allow read: if memberOf(familyId);
-      allow create, update: if admin() && validFamily(request.resource.data);
+      allow read: if active();
+      allow create, update: if active() && validFamily(request.resource.data);
       allow delete: if admin();
     }
 
     match /students/{studentId} {
-      allow read: if memberOf(resource.data.familyId);
-      allow create, update: if admin() && validStudent(request.resource.data, studentId);
+      allow read: if active();
+      allow create, update: if active() && validStudent(request.resource.data, studentId);
       allow delete: if admin();
     }
 
     match /inspection_rounds/{roundId} {
       allow read: if active();
-      allow create, update: if admin() && validRound(request.resource.data);
+      allow create, update: if active() && validRound(request.resource.data);
       allow delete: if admin();
     }
 
     match /inspections/{inspectionId} {
-      allow read: if memberOf(resource.data.familyId);
+      allow read: if active();
       allow create: if validInspection(request.resource.data)
         && inspectionId == request.resource.data.roundId + '__' + request.resource.data.studentId
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
-        && memberOf(request.resource.data.familyId)
+        && active()
         && (admin() || (roundOpen(request.resource.data.roundId)
           && studentMatches(request.resource.data)));
       allow update: if validInspection(request.resource.data)
@@ -158,17 +155,17 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'status','issueTypes','note','resolution','updatedBy','updatedAt'])
-        && memberOf(resource.data.familyId)
+        && active()
         && (admin() || (roundOpen(resource.data.roundId)
           && studentMatches(resource.data)));
       allow delete: if admin();
     }
 
     match /inspection_events/{eventId} {
-      allow read: if memberOf(resource.data.familyId);
+      allow read: if active();
       // Append-only operational change log. For tamper-proof logs, use trusted backend later.
       allow create: if validEvent(request.resource.data, eventId)
-        && memberOf(request.resource.data.familyId)
+        && active()
         && (admin() || roundOpen(request.resource.data.roundId))
         && existsAfter(/databases/$(database)/documents/inspections/$(request.resource.data.inspectionId))
         && getAfter(/databases/$(database)/documents/inspections/$(request.resource.data.inspectionId)).data.updatedBy == request.auth.uid
@@ -185,14 +182,14 @@ service cloud.firestore {
 
     // Independent second-pass records preserve the monthly primary results.
     match /inspection_round2/{inspectionId} {
-      allow read: if memberOf(resource.data.familyId);
+      allow read: if active();
       allow create: if validInspection(request.resource.data)
         && inspectionId == request.resource.data.roundId + '__' + request.resource.data.studentId
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
-        && memberOf(request.resource.data.familyId)
+        && active()
         && roundOpen(request.resource.data.roundId)
         && studentMatches(request.resource.data)
         && primaryWasAbsent(request.resource.data);
@@ -206,7 +203,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'status','issueTypes','note','resolution','updatedBy','updatedAt'])
-        && memberOf(resource.data.familyId)
+        && active()
         && roundOpen(resource.data.roundId)
         && studentMatches(resource.data)
         && primaryWasAbsent(resource.data);
@@ -215,10 +212,10 @@ service cloud.firestore {
 
 
     match /inspection_round2_events/{eventId} {
-      allow read: if memberOf(resource.data.familyId);
+      allow read: if active();
       // Append-only operational change log. For tamper-proof logs, use trusted backend later.
       allow create: if validEvent(request.resource.data, eventId)
-        && memberOf(request.resource.data.familyId)
+        && active()
         && roundOpen(request.resource.data.roundId)
         && primaryWasAbsent(request.resource.data)
         && existsAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId))

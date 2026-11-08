@@ -32,11 +32,14 @@ function inspection(studentId, familyId, uid){return {roundId:'2026-11',studentI
 
 // The tests explicitly verify data isolation even if someone changes a URL or query.
 test('guest cannot access students',async()=>{await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),'students','01')));});
-test('teacher can read own family, not another family',async()=>{
+test('teachers can read every KP Family and query all students and monthly records',async()=>{
   await assertSucceeds(getDoc(doc(as('t1'),'students','01')));
-  await assertFails(getDoc(doc(as('t1'),'students','02')));
-  await assertSucceeds(getDocs(query(collection(as('t1'),'students'),where('familyId','==','F01'))));
-  await assertFails(getDocs(collection(as('t1'),'students')));
+  await assertSucceeds(getDoc(doc(as('t1'),'students','02')));
+  await assertSucceeds(getDocs(collection(as('t1'),'students')));
+  await assertSucceeds(getDocs(collection(as('t1'),'families')));
+  await assertFails(getDocs(collection(as('t1'),'users')));
+  await assertSucceeds(getDocs(query(collection(as('t1'),'inspections'),where('roundId','==','2026-11'))));
+  await assertSucceeds(getDocs(query(collection(as('t1'),'inspection_round2'),where('roundId','==','2026-11'))));
 });
 test('teacher cannot add admin or change any user profile',async()=>{
   await assertFails(setDoc(doc(as('t1'),'users','t1'),{...teacher1,role:'admin'}));
@@ -44,15 +47,15 @@ test('teacher cannot add admin or change any user profile',async()=>{
   await assertSucceeds(setDoc(doc(as('admin'),'users','new_teacher'),{...teacher2,email:'new@example.test'}));
   await assertFails(setDoc(doc(as('admin'),'users','new_admin'),{...adminUser,active:true}));
 });
-test('teacher can save inspection and event only for assigned family',async()=>{
+test('teacher can save inspection and event across KP Families',async()=>{
   const db=as('t1');
   const ref=doc(db,'inspections','2026-11__01'); const batch=writeBatch(db);
   batch.set(ref,inspection('01','F01','t1'));
   batch.set(doc(collection(db,'inspection_events')),{inspectionId:'2026-11__01',roundId:'2026-11',studentId:'01',familyId:'F01',actorUid:'t1',status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp()});
   await assertSucceeds(batch.commit());
   await assertSucceeds(getDoc(ref));
-  await assertFails(getDoc(doc(as('t2'),'inspections','2026-11__01')));
-  await assertFails(setDoc(doc(db,'inspections','2026-11__02'),inspection('02','F02','t1')));
+  await assertSucceeds(getDoc(doc(as('t2'),'inspections','2026-11__01')));
+  await assertSucceeds(setDoc(doc(db,'inspections','2026-11__02'),inspection('02','F02','t1')));
 });
 test('teacher cannot inspect a mismatched student or spoof creator',async()=>{
   await assertFails(setDoc(doc(as('t1'),'inspections','2026-11__02'),inspection('02','F01','t1')));
@@ -93,9 +96,18 @@ test('only students who missed primary round are eligible in round two',async()=
   batch.set(doc(collection(db,'inspection_round2_events')),{inspectionId:'2026-11__01',roundId:'2026-11',studentId:'01',familyId:'F01',actorUid:'t1',status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp()});
   await assertSucceeds(batch.commit());
   await assertSucceeds(getDoc(record));
-  await assertFails(getDoc(doc(as('t2'),'inspection_round2','2026-11__01')));
-  // Student 02 never missed inspection and is in another family.
-  await assertFails(setDoc(doc(db,'inspection_round2','2026-11__02'),inspection('02','F02','t1')));
+  await assertSucceeds(getDoc(doc(as('t2'),'inspection_round2','2026-11__01')));
+  // A student in another KP Family becomes eligible after being marked absent.
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),'inspections','2026-11__02'),{
+      roundId:'2026-11',studentId:'02',familyId:'F02',status:'not_checked',issueTypes:[],note:'',resolution:'none',
+      createdBy:'t2',updatedBy:'t2',createdAt:now,updatedAt:now,
+    });
+  });
+  const cross=writeBatch(db);
+  cross.set(doc(db,'inspection_round2','2026-11__02'),inspection('02','F02','t1'));
+  cross.set(doc(collection(db,'inspection_round2_events')),{inspectionId:'2026-11__02',roundId:'2026-11',studentId:'02',familyId:'F02',actorUid:'t1',status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp()});
+  await assertSucceeds(cross.commit());
 });
 test('round-two entry rejected for a student who passed round one',async()=>{
   await env.withSecurityRulesDisabled(async ctx=>{
@@ -106,7 +118,10 @@ test('round-two entry rejected for a student who passed round one',async()=>{
   });
   await assertFails(setDoc(doc(as('t1'),'inspection_round2','2026-11__01'),inspection('01','F01','t1')));
 });
-test('admin can archive students but teachers cannot',async()=>{
-  await assertSucceeds(setDoc(doc(as('admin'),'students','01'),{...student('01','F01'),active:false}));
-  await assertFails(setDoc(doc(as('t1'),'students','01'),{...student('01','F01'),active:true}));
+test('teachers can manage students and rounds, while account management remains admin-only',async()=>{
+  await assertSucceeds(setDoc(doc(as('t1'),'students','02'),{...student('02','F02'),active:false}));
+  await assertSucceeds(setDoc(doc(as('t1'),'students','03'),{...student('03','F03'),active:true}));
+  await assertSucceeds(setDoc(doc(as('t1'),'families','F03'),{name:'F03',active:true}));
+  await assertSucceeds(setDoc(doc(as('t1'),'inspection_rounds','2026-12'),{name:'December',date:'2026-12-01',status:'open'}));
+  await assertFails(setDoc(doc(as('t1'),'users','t2'),{...teacher2,active:false}));
 });

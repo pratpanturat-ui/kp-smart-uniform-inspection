@@ -1,4 +1,4 @@
-# KP Smart Uniform Inspection (MVP v0.2)
+# KP Smart Uniform Inspection (v0.4)
 
 **ระบบตรวจเครื่องแต่งกาย โรงเรียนคีรีราษฎร์พัฒนา**  
 React 19 + Vite 7 + Tailwind CSS 4 + Firebase Authentication (Google สำหรับ Admin / Username+Password สำหรับครู) + Cloud Firestore + Cloudflare Pages + GitHub.
@@ -12,7 +12,7 @@ React 19 + Vite 7 + Tailwind CSS 4 + Firebase Authentication (Google สำห�
 - ครูเข้าสู่ระบบด้วย Username + Password ส่วนบุคคล (ไม่ต้องมี Gmail ของครู) โดยระบบแปลง Username เป็นอีเมลภายในสำหรับ Firebase Auth
 - Admin สร้าง Username และรหัสผ่านเริ่มต้นให้ครูผ่านหน้าเว็บ ใช้ Firebase Auth instance แยกจากเซสชัน Admin
 - Admin คนแรกหนึ่งบัญชี (Sign in with Google แล้ว bootstrap role ผ่าน Firebase Console) จัดการครู ครอบครัว รอบตรวจ และนำเข้า CSV นักเรียน
-- ครูเห็นเฉพาะนักเรียนและผลตรวจของ KP Family ที่กำหนดใน `users/{uid}.familyIds` โดย Security Rules บังคับฝั่ง Firestore
+- ครูทุกคนที่สถานะ `active=true` เห็นและตรวจนักเรียนได้ครบ 21 KP Family รวมทั้งรายชื่อที่ไม่มาในรอบที่ 1 เพื่อมาตรวจรอบที่ 2 โดยไม่ต้องสร้าง Firebase composite index เพิ่มสำหรับคำค้นตามเดือน
 - ตรวจตามครอบครัว: ผ่าน / ต้องแก้ไข (หลายข้อ) / ไม่ได้ตรวจ (ไม่ใช่สถานะขาดเรียน)
 - หนึ่งเอกสารผลตรวจต่อหนึ่งนักเรียนต่อหนึ่งรอบ; อัปเดตซ้ำได้ ไม่เพิ่มจำนวนผลตรวจซ้ำ
 - ติดตามสถานะ `pending` / `resolved`; บันทึกประวัติการกดใน `inspection_events` แบบ append-only
@@ -223,3 +223,13 @@ Cloudflare Pages ใช้ HTTPS และมี build ใหม่เมื่�
 - จำเป็นต้อง Deploy **Firestore Rules เวอร์ชันใหม่** และ **firestore.indexes.json** โดยใช้ `npx firebase deploy --only firestore:rules,firestore:indexes` ก่อนเริ่มใช้งานรอบ 2 หรือจัดการรายชื่อบนเว็บไซต์จริง; การ Push GitHub ไม่ได้ Deploy Firestore Rules ให้เอง
 - ตรวจรอบสองต้องทำในขณะที่รอบประจำเดือนยังอยู่สถานะ `open`; ไม่มีการสร้างรอบตรวจเดือนใหม่เพื่อรองรับรอบ 2
 - ไม่เพิ่มรูปหลักฐานในเวอร์ชันนี้ตามแผนระยะต่อไป
+
+
+## v0.4 — ครูใช้งานเมนูตรวจและจัดการข้อมูลเทียบเท่า Admin
+
+- ครูที่เข้าสู่ระบบด้วย Username/Password และ `active=true` เลือกตรวจได้ครบทั้ง 21 ครอบครัว; มุมมองรอบ 2 ใช้ผล `not_checked` ของรอบแรกในเดือนเดียวกันจากทุกครอบครัว.
+- โหลดข้อมูลรอบตรวจด้วยเงื่อนไข `roundId` เดียว จึงไม่ต้องพึ่งดัชนี `familyId + roundId` ที่อาจยังไม่ได้ติดตั้ง และลดความเสี่ยงที่ครูจะเห็นรายการรอบ 2 ว่างโดยไม่ตั้งใจ.
+- ครูใช้เมนูเพิ่ม/แก้ไข/ซ่อน/กู้คืนรายชื่อนักเรียน, นำเข้า CSV, จัดการชื่อ KP Family และเปิด/ปิดรอบตรวจได้เช่น Admin.
+- **Admin เพียงคนเดียว** ยังสงวนสิทธิ์สร้างบัญชีและกำหนดสิทธิ์ครูในเมนู `สิทธิ์ครู`, รวมทั้งการลบข้อมูลถาวร (UI ใช้วิธีซ่อนรายชื่อนักเรียนอยู่แล้ว). ครูจะไม่สามารถเลื่อนตัวเองเป็น Admin ได้.
+- **ต้องติดตั้ง `firestore.rules` เวอร์ชันนี้ใน Firebase Console และกด Publish/Deploy**. การ Commit กฎไว้บน GitHub ไม่ได้ทำให้กฎบน Firebase เปลี่ยนอัตโนมัติ.
+- หากยังกดปุ่มครอบครัวแล้วไม่เห็นรายชื่อ ให้ตรวจว่ามีเอกสารใน `students` และรอบเดือนที่เลือกตรงกับ `inspections.roundId` หรือไม่.

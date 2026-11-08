@@ -8,7 +8,7 @@ import {
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, onSnapshot, where } from 'firebase/firestore';
 import { auth, configured, db } from './services/firebase';
-import { getFamilyDocuments, inspectionQuery, saveInspection, updateFamily, ensureOfficialFamilies, updateRound,
+import { inspectionQuery, saveInspection, updateFamily, ensureOfficialFamilies, updateRound,
   updateTeacher, upsertStudents, saveStudent, setStudentActive, watchCollection } from './services/data';
 import { createStaffAccount } from './services/staff-users';
 import { OFFICIAL_FAMILIES, missingOrPlaceholderFamilies } from './data/family-config';
@@ -135,32 +135,28 @@ function AppShell() {
     if (!profile?.active) return;
     setLoading(true);
     const unsubRounds = watchCollection('inspection_rounds',[],setRounds,err=>showToast(prettyError(err),'error'));
-    let unsubFamilies = ()=>{};
-    let bootstrapChecked = false;
     let disposed = false;
-    if (isAdmin) {
-      unsubFamilies = watchCollection('families', [], rows => {
-        setFamilies(rows);
-        // First confirmed server snapshot only; never seed from initial empty React state.
-        if (bootstrapChecked) return;
-        bootstrapChecked = true;
-        const pending = missingOrPlaceholderFamilies(rows);
-        if (!pending.length) return;
-        ensureOfficialFamilies(pending).then(result => {
-          if (!disposed && result.created + result.renamedPlaceholders > 0)
-            showToast(`เพิ่ม/ปรับชื่อ KP Family อัตโนมัติแล้ว ${result.created + result.renamedPlaceholders} ครอบครัว`);
-        }).catch(error => {
-          if (!disposed) showToast(`นำเข้าครอบครัวอัตโนมัติไม่สำเร็จ: ${prettyError(error)}`, 'error');
-        });
-      }, error => showToast(prettyError(error), 'error'));
-    } else getFamilyDocuments(profile.familyIds || []).then(setFamilies).catch(err=>showToast(prettyError(err),'error'));
+    // All authenticated staff can inspect any KP Family. Only the Admin seeds labels.
+    let bootstrapChecked = false;
+    const unsubFamilies = watchCollection('families', [], rows => {
+      setFamilies(rows);
+      if (!isAdmin || disposed || bootstrapChecked) return;
+      bootstrapChecked = true;
+      const pending = missingOrPlaceholderFamilies(rows);
+      if (!pending.length) return;
+      ensureOfficialFamilies(pending).then(result => {
+        if (!disposed && result.created + result.renamedPlaceholders > 0)
+          showToast(`เพิ่ม/ปรับชื่อ KP Family อัตโนมัติแล้ว ${result.created + result.renamedPlaceholders} ครอบครัว`);
+      }).catch(error => {
+        if (!disposed) showToast(`นำเข้าครอบครัวอัตโนมัติไม่สำเร็จ: ${prettyError(error)}`, 'error');
+      });
+    }, error => showToast(prettyError(error), 'error'));
     return ()=>{disposed = true;unsubRounds();unsubFamilies();};
-  },[profile?.active,profile?.role,JSON.stringify(profile?.familyIds || [])]);
+  },[profile?.active,profile?.role,isAdmin]);
   useEffect(()=>{
     if (!profile?.active || !families.length) return;
-    if (!isAdmin && !families.some(f=>f.id===selectedFamily)) setSelectedFamily(families[0].id);
-    if (isAdmin && selectedFamily && !families.some(f=>f.id===selectedFamily)) setSelectedFamily('');
-  },[profile?.role,families,selectedFamily]);
+    if (selectedFamily && !families.some(f=>f.id===selectedFamily)) setSelectedFamily('');
+  },[profile?.active,families,selectedFamily]);
   useEffect(()=>{
     if (!rounds.length) { setSelectedRound(''); return; }
     if (!rounds.some(r=>r.id===selectedRound)) {
@@ -169,19 +165,20 @@ function AppShell() {
     }
   },[rounds,selectedRound]);
   useEffect(()=>{
-    if (!profile?.active || (!isAdmin && !selectedFamily)) {setStudents([]);setLoading(false);return;}
-    const constraints = isAdmin ? [] : [where('familyId','==',selectedFamily)];
+    if (!profile?.active) {setStudents([]);setLoading(false);return;}
     setLoading(true);
-    return watchCollection('students',constraints,items=>{setStudents(items);setLoading(false);},err=>{showToast(prettyError(err),'error');setLoading(false);});
-  },[profile?.active,profile?.role,selectedFamily,isAdmin]);
+    // Collection-wide query is now authorized for every active teacher and Admin.
+    return watchCollection('students',[],items=>{setStudents(items);setLoading(false);},err=>{showToast(prettyError(err),'error');setLoading(false);});
+  },[profile?.active,profile?.role]);
   useEffect(()=>{
-    if (!profile?.active || !selectedRound || (!isAdmin && !selectedFamily)) {setInspections([]);return;}
-    return watchCollection('inspections',inspectionQuery(profile,selectedRound,selectedFamily),setInspections,err=>showToast(prettyError(err),'error'));
-  },[profile?.active,profile?.role,selectedRound,selectedFamily,isAdmin]);
+    if (!profile?.active || !selectedRound) {setInspections([]);return;}
+    // Use a single-field roundId query: no composite index is required for teachers.
+    return watchCollection('inspections',inspectionQuery(selectedRound),setInspections,err=>showToast(prettyError(err),'error'));
+  },[profile?.active,profile?.role,selectedRound]);
   useEffect(()=>{
-    if (!profile?.active || !selectedRound || (!isAdmin && !selectedFamily)) {setRoundTwoInspections([]);return;}
-    return watchCollection('inspection_round2',inspectionQuery(profile,selectedRound,selectedFamily),setRoundTwoInspections,err=>showToast(prettyError(err),'error'));
-  },[profile?.active,profile?.role,selectedRound,selectedFamily,isAdmin]);
+    if (!profile?.active || !selectedRound) {setRoundTwoInspections([]);return;}
+    return watchCollection('inspection_round2',inspectionQuery(selectedRound),setRoundTwoInspections,err=>showToast(prettyError(err),'error'));
+  },[profile?.active,profile?.role,selectedRound]);
   useEffect(()=>{
     if (!isAdmin) {setTeachers([]);return;}
     return watchCollection('users',[],setTeachers,err=>showToast(prettyError(err),'error'));
@@ -230,13 +227,14 @@ function AppShell() {
     {id:'inspection',label:'ตรวจรอบที่ 1',icon:ClipboardCheck},
     {id:'round2',label:'ตรวจรอบที่ 2',icon:RotateCcw},
     {id:'followup',label:'ติดตามการแก้ไข',icon:ListChecks},
-    ...(isAdmin ? [{id:'students',label:'จัดการรายชื่อนักเรียน',icon:UserPlus},{id:'admin',label:'ตั้งค่าระบบ',icon:Settings}] : []),
+    {id:'students',label:'จัดการรายชื่อนักเรียน',icon:UserPlus},
+    {id:'admin',label:'ตั้งค่าระบบ',icon:Settings},
   ];
   return <div className="app-shell">
     <aside className={cn('sidebar',menuOpen && 'sidebar-open')}>
       <div className="sidebar-brand"><div className="brand-logo"><Shirt className="size-6"/></div><div><b>KP SMART</b><small>UNIFORM INSPECTION</small></div></div>
       <p className="sidebar-caption">เมนูหลัก</p>
-      <nav className="nav-list" aria-label="เมนูหลัก">{nav.map(n=><button key={n.id} className={cn('nav-item',tab===n.id && 'nav-item-active')} onClick={()=>{setTab(n.id);setInspectionFamily('');if(isAdmin && ['inspection','round2'].includes(n.id))setSelectedFamily('');setMenuOpen(false);}}><n.icon className="size-5"/><span>{n.label}</span>{tab===n.id && <span className="nav-active-dot"/>}</button>)}</nav>
+      <nav className="nav-list" aria-label="เมนูหลัก">{nav.map(n=><button key={n.id} className={cn('nav-item',tab===n.id && 'nav-item-active')} onClick={()=>{setTab(n.id);setInspectionFamily('');if(['inspection','round2'].includes(n.id))setSelectedFamily('');setMenuOpen(false);}}><n.icon className="size-5"/><span>{n.label}</span>{tab===n.id && <span className="nav-active-dot"/>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="user-identity"><div className="user-avatar">{profile.name?.slice(0,1)||'ค'}</div><div className="min-w-0"><b className="truncate block">{profile.name}</b><small>{isAdmin ? 'ผู้ดูแลระบบ (Admin)' : 'ครูผู้ตรวจ'}</small></div></div>
         <button className="nav-item logout" onClick={()=>signOut(auth)}><LogOut className="size-5"/>ออกจากระบบ</button></div>
     </aside>
@@ -248,21 +246,21 @@ function AppShell() {
           {!['admin','students'].includes(tab) && <button className="btn btn-outline print-button" onClick={exportReport} disabled={!selectedRound}><Download className="size-4"/> ส่งออก CSV</button>}
         </div>
         {!['admin','students'].includes(tab) && <div className="filter-panel"><div className="filter-cell"><label>รอบตรวจ</label><div className="select-wrap"><CalendarDays className="size-4"/><select className="field" value={selectedRound} onChange={e=>setSelectedRound(e.target.value)}><option value="">เลือกรอบตรวจ</option>{[...rounds].sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option value={r.id} key={r.id}>{r.name} · {r.status==='open'?'เปิด':'ปิด'}</option>)}</select><ChevronDown className="select-chevron"/></div></div>
-            {!['inspection','round2'].includes(tab) && <div className="filter-cell"><label>KP Family</label><div className="select-wrap"><Users className="size-4"/><select className="field" value={selectedFamily} onChange={e=>setSelectedFamily(e.target.value)}>{isAdmin && <option value="">ทุกครอบครัว</option>}{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><option key={f.id} value={f.id}>{f.id} — {f.name}</option>)}</select><ChevronDown className="select-chevron"/></div></div>}
+            {!['inspection','round2'].includes(tab) && <div className="filter-cell"><label>KP Family</label><div className="select-wrap"><Users className="size-4"/><select className="field" value={selectedFamily} onChange={e=>setSelectedFamily(e.target.value)}><option value="">ทุกครอบครัว</option>{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><option key={f.id} value={f.id}>{f.id} — {f.name}</option>)}</select><ChevronDown className="select-chevron"/></div></div>}
             <div className="filter-round-status"><Badge kind={roundOpen?'pass':'neutral'}>{chosenRound ? (roundOpen?'เปิดให้ตรวจ':'ปิดรอบตรวจ'):'ยังไม่มีรอบตรวจ'}</Badge></div>
           </div>}
-        {loading && !['admin','students'].includes(tab)?<Spinner/> : tab==='overview'?<Overview stats={stats} students={displayedStudents} inspections={displayedInspections} familyMap={familyMap} currentFamily={currentFamily} chosenRound={chosenRound} onInspect={()=>{setInspectionFamily('');if(isAdmin)setSelectedFamily('');setTab('inspection');}} />
+        {loading && !['admin','students'].includes(tab)?<Spinner/> : tab==='overview'?<Overview stats={stats} students={displayedStudents} inspections={displayedInspections} familyMap={familyMap} currentFamily={currentFamily} chosenRound={chosenRound} onInspect={()=>{setInspectionFamily('');setSelectedFamily('');setTab('inspection');}} />
           :['inspection','round2'].includes(tab)?<Inspection
               phase={tab==='round2'?2:1} families={families} allStudents={students.filter(s=>s.active!==false)} students={displayedStudents}
               records={tab==='round2'?roundTwoRecords:records} primaryRecords={records}
               allPrimaryRecords={inspections} activeFamily={inspectionFamily}
               onSelectFamily={id=>{setInspectionFamily(id);setSelectedFamily(id);}}
-              onBack={()=>{setInspectionFamily('');if(isAdmin)setSelectedFamily('');}}
+              onBack={()=>{setInspectionFamily('');setSelectedFamily('');}}
               search={search} setSearch={setSearch} statusFilter={statusFilter} setStatusFilter={setStatusFilter}
               pendingId={savingId} roundOpen={roundOpen} onQuick={write} onIssue={s=>setIssueStudent({student:s,phase:tab==='round2'?2:1})} familyMap={familyMap}/>
           :tab==='followup'?<Followup students={displayedStudents} records={records} savingId={savingId} write={write} roundOpen={roundOpen} />
           :tab==='students'?<StudentsManager students={students} families={families} notify={showToast}/>
-          :<Admin families={families} rounds={rounds} teachers={teachers} students={students} notify={showToast} />}
+          :<Admin families={families} rounds={rounds} teachers={teachers} students={students} notify={showToast} isAdmin={isAdmin} />}
         <footer className="app-footer">KP Smart Uniform Inspection · โรงเรียนคีรีราษฎร์พัฒนา · ข้อมูลนักเรียนใช้ภายในสถานศึกษาเท่านั้น</footer>
       </main></div>
       {issueStudent && <IssueDialog student={issueStudent.student} record={(issueStudent.phase===2?roundTwoRecords:records)[issueStudent.student.studentId]} pending={savingId===issueStudent.student.studentId} onClose={()=>setIssueStudent(null)} onSave={changes=>write(issueStudent.student,changes,issueStudent.phase)}/>}
@@ -347,11 +345,11 @@ function Followup({students,records,savingId,write,roundOpen}) {
   </>;
 }
 
-function Admin({families,rounds,teachers,students,notify}) {
+function Admin({families,rounds,teachers,students,notify,isAdmin}) {
   const [section,setSection] = useState('families');
-  const tabs = [{id:'families',label:'KP Family',icon:Users},{id:'rounds',label:'รอบตรวจ',icon:CalendarDays},{id:'teachers',label:'สิทธิ์ครู',icon:ShieldCheck},{id:'students',label:'นำเข้านักเรียน',icon:Upload}];
+  const tabs = [{id:'families',label:'KP Family',icon:Users},{id:'rounds',label:'รอบตรวจ',icon:CalendarDays},...(isAdmin ? [{id:'teachers',label:'สิทธิ์ครู',icon:ShieldCheck}] : []),{id:'students',label:'นำเข้านักเรียน',icon:Upload}];
   return <><div className="admin-tabs">{tabs.map(t=><button key={t.id} className={cn(section===t.id&&'admin-tab-active')} onClick={()=>setSection(t.id)}><t.icon className="size-4"/>{t.label}</button>)}</div>
-    {section==='families'?<FamiliesAdmin families={families} notify={notify}/>:section==='rounds'?<RoundsAdmin rounds={rounds} notify={notify}/>:section==='teachers'?<TeachersAdmin teachers={teachers} families={families} notify={notify}/>:<StudentsAdmin students={students} families={families} notify={notify}/>}</>;
+    {section==='families'?<FamiliesAdmin families={families} notify={notify}/>:section==='rounds'?<RoundsAdmin rounds={rounds} notify={notify}/>:section==='teachers'&&isAdmin?<TeachersAdmin teachers={teachers} families={families} notify={notify}/>:<StudentsAdmin students={students} families={families} notify={notify}/>}</>;
 }
 function FamiliesAdmin({families,notify}) {
   const [id,setId] = useState(''); const [name,setName] = useState(''); const [busy,setBusy] = useState(false);
@@ -449,7 +447,7 @@ function StudentsManager({students,families,notify}) {
     setBusy(true);try{await setStudentActive(s.studentId,active);notify(active?'กู้คืนรายชื่อแล้ว':'ลบจากรายการตรวจแล้ว (เก็บประวัติไว้)');if(form.studentId===s.studentId)reset();}catch(e){notify(prettyError(e),'error');}finally{setBusy(false);}
   }
   return <div className="student-manager">
-    <section className="card card-pad"><div className="card-title"><div><p className="eyebrow">จัดการข้อมูลนักเรียน</p><h2>{editing?'แก้ไขข้อมูลนักเรียน':'เพิ่มนักเรียนใหม่'}</h2><p className="text-sm text-slate-500">เฉพาะ Admin · รหัสนักเรียนต้องตรงกับฐานข้อมูลเดิม</p></div>{editing&&<button className="btn btn-outline" onClick={reset}>ยกเลิกแก้ไข</button>}</div>
+    <section className="card card-pad"><div className="card-title"><div><p className="eyebrow">จัดการข้อมูลนักเรียน</p><h2>{editing?'แก้ไขข้อมูลนักเรียน':'เพิ่มนักเรียนใหม่'}</h2><p className="text-sm text-slate-500">ครูและ Admin จัดการรายชื่อได้ · รหัสนักเรียนต้องตรงกับฐานข้อมูลเดิม</p></div>{editing&&<button className="btn btn-outline" onClick={reset}>ยกเลิกแก้ไข</button>}</div>
       <form onSubmit={submit} className="student-editor-form"><label><span className="form-label">รหัสนักเรียน</span><input className="field" required readOnly={editing} value={form.studentId} onChange={e=>setField('studentId',e.target.value)} placeholder="รหัสประจำตัว (แก้ไม่ได้ภายหลัง)"/></label>
         <label><span className="form-label">ชื่อ–นามสกุล</span><input className="field" required value={form.name} onChange={e=>setField('name',e.target.value)} placeholder="ชื่อ–นามสกุลนักเรียน"/></label>
         <label><span className="form-label">ชั้น/ห้อง</span><input className="field" required value={form.room} onChange={e=>setField('room',e.target.value)} placeholder="เช่น ม.3/1"/></label>

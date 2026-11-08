@@ -14,11 +14,10 @@ export async function getFamilyDocuments(ids) {
   const snapshots = await Promise.all(ids.map(id => getDoc(doc(db, 'families', id))));
   return snapshots.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
 }
-export function inspectionQuery(profile, roundId, familyId) {
-  if (!roundId) return null;
-  return profile.role === 'admin' && !familyId
-    ? [where('roundId', '==', roundId)]
-    : [where('familyId', '==', familyId), where('roundId', '==', roundId)];
+export function inspectionQuery(roundId) {
+  // Every active staff member can inspect all 21 families. One field avoids
+  // the composite indexes that previously made teacher round-two lists blank.
+  return roundId ? [where('roundId', '==', roundId)] : [];
 }
 export async function saveInspection({ user, roundId, student, old, status, issueTypes = [], note = '', resolution = 'none', phase = 1 }) {
   const key = inspectionId(roundId, student.studentId);
@@ -118,7 +117,7 @@ export async function loadInspectorsForRound(roundId) {
   return s.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-/** Only Admin may create/update student information, enforced again in firestore.rules.
+/** Active staff may create/update student information, enforced in firestore.rules.
  * Historical inspections remain linked to the immutable studentId.
  */
 export async function saveStudent(student, active = true) {

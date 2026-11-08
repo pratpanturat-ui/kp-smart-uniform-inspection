@@ -11,3 +11,9 @@ test('only explicitly marked absent in round one enter round two',()=>{
 test('per-round counts do not conflate absence and not-yet-checked',()=>{
  assert.deepEqual(inspectionProgress(students,{1:{status:'not_checked'},2:{status:'pass'}}),{total:3,pass:1,issue:0,absent:1,uninspected:1});
 });
+
+test('second-round candidates include all absent students across KP Families',()=>{
+ const roster=[{studentId:'01',familyId:'F01',active:true},{studentId:'02',familyId:'F02',active:true},{studentId:'03',familyId:'F03',active:true}];
+ const primary={'01':{status:'not_checked'},'02':{status:'not_checked'},'03':{status:'issue'}};
+ assert.deepEqual(secondRoundCandidates(roster,primary).map(s=>s.studentId),['01','02']);
+});
