@@ -67,3 +67,9 @@ button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:1100px){.family-tile-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.family-selector-heading{padding:17px}.family-selector-heading h2{font-size:19px}.family-tile-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.family-square{min-height:115px;padding:13px 11px;border-radius:13px}.family-square-code{font-size:19px}.family-square-name{font-size:12px}.family-square-meta{font-size:10px}.mobile-student-list{grid-template-columns:1fr}.mobile-student-card{padding:15px}.mobile-check-button{min-height:50px;font-size:14px}.inspection-title-card{padding:17px}.inspection-title-card h2{font-size:21px}.inspection-search input{font-size:16px}.student-editor-form,.student-manager-filter{grid-template-columns:1fr}.student-manager-filter{gap:8px}.manager-student{align-items:stretch;flex-direction:column}.manager-buttons .btn{flex:1;justify-content:center}}
 @media(max-width:380px){.family-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.family-square{min-height:108px}.mobile-student-avatar{width:33px;height:33px}.mobile-student-info strong{font-size:14px}.mobile-check-button{font-size:13px;gap:3px}}
+
+/* Persistent database-read diagnosis; do not display permission errors as an empty roster. */
+.roster-access-notice{display:flex;align-items:flex-start;gap:11px;padding:15px 17px;border:1px solid #e6c992;border-radius:13px;background:#fff8eb;color:#855316;font-size:13px;line-height:1.6;margin:12px 0 18px}
+.roster-access-notice strong{font-size:14px;display:block;margin-bottom:4px;color:#7f4d12}
+.roster-access-notice a{color:#185ba5;display:inline-block;margin-top:8px;font-weight:700;text-decoration:underline}
+@media(max-width:640px){.roster-access-notice{font-size:13px;padding:14px 12px}}

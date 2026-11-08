@@ -9,7 +9,8 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProv
 import { doc, onSnapshot, where } from 'firebase/firestore';
 import { auth, configured, db } from './services/firebase';
 import { inspectionQuery, saveInspection, updateFamily, ensureOfficialFamilies, updateRound,
-  updateTeacher, upsertStudents, saveStudent, setStudentActive, watchCollection } from './services/data';
+  updateTeacher, upsertStudents, saveStudent, setStudentActive, watchCollection,
+  watchStudentRoster, getFamilyDocuments } from './services/data';
 import { createStaffAccount } from './services/staff-users';
 import { OFFICIAL_FAMILIES, missingOrPlaceholderFamilies } from './data/family-config';
 import { usernameToEmail, validateUsername, validateStaffPassword } from './utils/staff-auth';
@@ -123,6 +124,8 @@ function AppShell() {
   const [savingId,setSavingId] = useState(null); const [issueStudent,setIssueStudent] = useState(null);
   const [inspectionFamily,setInspectionFamily] = useState('');
   const [toast,setToast] = useState(null); const [loading,setLoading] = useState(true);
+  const [studentLoadProblem,setStudentLoadProblem] = useState(null);
+  const [familyLoadProblem,setFamilyLoadProblem] = useState(null);
   const [menuOpen,setMenuOpen] = useState(false);
   const isAdmin = profile?.role === 'admin';
   const showToast = (message,type = 'success') => setToast({ message,type });
@@ -140,6 +143,7 @@ function AppShell() {
     let bootstrapChecked = false;
     const unsubFamilies = watchCollection('families', [], rows => {
       setFamilies(rows);
+      setFamilyLoadProblem(null);
       if (!isAdmin || disposed || bootstrapChecked) return;
       bootstrapChecked = true;
       const pending = missingOrPlaceholderFamilies(rows);
@@ -150,7 +154,20 @@ function AppShell() {
       }).catch(error => {
         if (!disposed) showToast(`นำเข้าครอบครัวอัตโนมัติไม่สำเร็จ: ${prettyError(error)}`, 'error');
       });
-    }, error => showToast(prettyError(error), 'error'));
+    }, error => {
+      if (disposed) return;
+      if (error?.code === 'permission-denied' && !isAdmin && Array.isArray(profile?.familyIds) && profile.familyIds.length) {
+        // The older rules allow get() of assigned families but not collection list().
+        getFamilyDocuments(profile.familyIds).then(rows => {
+          if (!disposed) { setFamilies(rows); setFamilyLoadProblem('restricted'); }
+        }).catch(inner => {
+          if (!disposed) { setFamilies([]); setFamilyLoadProblem(inner?.code || 'failed'); }
+        });
+      } else {
+        setFamilies([]);
+        setFamilyLoadProblem(error?.code || 'failed');
+      }
+    });
     return ()=>{disposed = true;unsubRounds();unsubFamilies();};
   },[profile?.active,profile?.role,isAdmin]);
   useEffect(()=>{
@@ -165,11 +182,14 @@ function AppShell() {
     }
   },[rounds,selectedRound]);
   useEffect(()=>{
-    if (!profile?.active) {setStudents([]);setLoading(false);return;}
+    if (!profile?.active) {setStudents([]);setStudentLoadProblem(null);setLoading(false);return;}
     setLoading(true);
-    // Collection-wide query is now authorized for every active teacher and Admin.
-    return watchCollection('students',[],items=>{setStudents(items);setLoading(false);},err=>{showToast(prettyError(err),'error');setLoading(false);});
-  },[profile?.active,profile?.role]);
+    setStudentLoadProblem(null);
+    // Never convert a Firestore permission error into a misleading empty roster.
+    return watchStudentRoster(profile,
+      items=>{setStudents(items);setLoading(false);},
+      problem=>{setStudentLoadProblem(problem);if(problem?.scope==='none')setLoading(false);});
+  },[profile?.active,profile?.role,JSON.stringify(profile?.familyIds || [])]);
   useEffect(()=>{
     if (!profile?.active || !selectedRound) {setInspections([]);return;}
     // Use a single-field roundId query: no composite index is required for teachers.
@@ -249,6 +269,19 @@ function AppShell() {
             {!['inspection','round2'].includes(tab) && <div className="filter-cell"><label>KP Family</label><div className="select-wrap"><Users className="size-4"/><select className="field" value={selectedFamily} onChange={e=>setSelectedFamily(e.target.value)}><option value="">ทุกครอบครัว</option>{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><option key={f.id} value={f.id}>{f.id} — {f.name}</option>)}</select><ChevronDown className="select-chevron"/></div></div>}
             <div className="filter-round-status"><Badge kind={roundOpen?'pass':'neutral'}>{chosenRound ? (roundOpen?'เปิดให้ตรวจ':'ปิดรอบตรวจ'):'ยังไม่มีรอบตรวจ'}</Badge></div>
           </div>}
+        {(studentLoadProblem || familyLoadProblem) && <section className="roster-access-notice" role="alert">
+          <AlertTriangle className="size-5 shrink-0"/>
+          <div><strong>รายชื่อนักเรียนยังโหลดได้ไม่ครบ</strong>
+            <p>{studentLoadProblem?.scope==='assigned-families' || familyLoadProblem==='restricted'
+              ? 'Firebase ยังใช้กฎสิทธิ์เดิม: ขณะนี้ครูจะเห็นได้เฉพาะครอบครัวที่ได้รับมอบหมาย ต้อง Deploy firestore.rules เวอร์ชันล่าสุดเพื่อเห็นทั้ง 21 ครอบครัว'
+              : 'อ่านข้อมูลจาก Firestore ไม่สำเร็จ กรุณาตรวจสอบ Security Rules การเชื่อมต่อ และข้อมูลในฐาน students'}</p>
+            <a href="https://console.firebase.google.com/project/kp-smart-uniform-inspection/firestore/rules" target="_blank" rel="noreferrer">เปิด Firebase → Firestore Rules</a>
+          </div>
+        </section>}
+        {!loading && !studentLoadProblem && students.length===0 && <section className="roster-access-notice" role="status">
+          <AlertCircle className="size-5 shrink-0"/>
+          <div><strong>ฐานข้อมูลยังไม่มีรายชื่อนักเรียน</strong><p>กรุณาตรวจสอบ Collection students ใน Firestore หรือใช้เมนูตั้งค่าระบบ → นำเข้านักเรียน CSV (ไม่ได้ลบข้อมูลใด ๆ อัตโนมัติ)</p></div>
+        </section>}
         {loading && !['admin','students'].includes(tab)?<Spinner/> : tab==='overview'?<Overview stats={stats} students={displayedStudents} inspections={displayedInspections} familyMap={familyMap} currentFamily={currentFamily} chosenRound={chosenRound} onInspect={()=>{setInspectionFamily('');setSelectedFamily('');setTab('inspection');}} />
           :['inspection','round2'].includes(tab)?<Inspection
               phase={tab==='round2'?2:1} families={families} allStudents={students.filter(s=>s.active!==false)} students={displayedStudents}

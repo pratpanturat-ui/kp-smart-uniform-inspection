@@ -5,11 +5,59 @@ import {
 import { db } from './firebase';
 import { inspectionId } from '../utils/domain';
 import { OFFICIAL_FAMILIES } from '../data/family-config';
+import { assignedFamilyFallbackIds } from '../utils/roster-access';
 
 export function watchCollection(name, clauses, callback, onError) {
   return onSnapshot(clauses.length ? query(collection(db, name), ...clauses) : collection(db, name),
     snapshot => callback(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))), onError);
 }
+/**
+ * Load the full school roster on the newest Firestore rules.
+ * If the server still has the older per-family rules, show the teacher's
+ * assigned-family roster as a temporary fallback and surface the permission
+ * warning; never portray it as the entire school's data.
+ */
+export function watchStudentRoster(profile, onRows, onProblem) {
+  let disposed = false;
+  const fallbackUnsubs = [];
+  const unsubscribe = watchCollection('students', [], rows => {
+    if (disposed) return;
+    onRows(rows);
+    onProblem(null);
+  }, error => {
+    if (disposed) return;
+    const familyIds = assignedFamilyFallbackIds(profile, error);
+    if (!familyIds.length) {
+      onRows([]);
+      onProblem({ code: error?.code || 'unknown', scope: 'none' });
+      return;
+    }
+    // The production rules are not yet updated. A query constrained to one
+    // familyId is valid under legacy memberOf(resource.data.familyId) rules.
+    onProblem({ code: 'permission-denied', scope: 'assigned-families' });
+    const familyRows = new Map();
+    familyIds.forEach(familyId => {
+      const stop = watchCollection('students', [where('familyId', '==', familyId)], rows => {
+        if (disposed) return;
+        familyRows.set(familyId, rows);
+        const combined = new Map();
+        for (const group of familyRows.values()) for (const row of group)
+          combined.set(row.studentId || row.id, row);
+        onRows([...combined.values()]);
+      }, fallbackError => {
+        if (disposed) return;
+        onProblem({ code: fallbackError?.code || 'unknown', scope: 'none' });
+      });
+      fallbackUnsubs.push(stop);
+    });
+  });
+  return () => {
+    disposed = true;
+    unsubscribe();
+    fallbackUnsubs.forEach(stop => stop());
+  };
+}
+
 export async function getFamilyDocuments(ids) {
   const snapshots = await Promise.all(ids.map(id => getDoc(doc(db, 'families', id))));
   return snapshots.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
