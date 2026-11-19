@@ -40,6 +40,7 @@ test('teachers can read every KP Family and query all students and monthly recor
   await assertFails(getDocs(collection(as('t1'),'users')));
   await assertSucceeds(getDocs(query(collection(as('t1'),'inspections'),where('roundId','==','2026-11'))));
   await assertSucceeds(getDocs(query(collection(as('t1'),'inspection_round2'),where('roundId','==','2026-11'))));
+  await assertSucceeds(getDocs(query(collection(as('t1'),'inspection_final'),where('roundId','==','2026-11'))));
 });
 test('teacher cannot add admin or change any user profile',async()=>{
   await assertFails(setDoc(doc(as('t1'),'users','t1'),{...teacher1,role:'admin'}));
@@ -171,4 +172,37 @@ test('round-two result can change from failed to passed after a follow-up inspec
 
 test('student without any first-round inspection is not eligible for round two',async()=>{
   await assertFails(setDoc(doc(as('t1'),'inspection_round2','2026-11__01'),inspection('01','F01','t1')));
+});
+
+
+test('teacher can save a final pass for a student who failed round two while preserving earlier results',async()=>{
+ const previous={roundId:'2026-11',studentId:'01',familyId:'F01',status:'issue',issueTypes:['shoes'],
+   note:'รองเท้า',resolution:'pending',createdBy:'t1',updatedBy:'t1',createdAt:now,updatedAt:now};
+ await env.withSecurityRulesDisabled(async ctx=>{
+   await setDoc(doc(ctx.firestore(),'inspections','2026-11__01'),previous);
+   await setDoc(doc(ctx.firestore(),'inspection_round2','2026-11__01'),previous);
+ });
+ const db=as('t1'),batch=writeBatch(db);
+ batch.set(doc(db,'inspection_final','2026-11__01'),inspection('01','F01','t1'));
+ batch.set(doc(collection(db,'inspection_final_events')),{
+   inspectionId:'2026-11__01',roundId:'2026-11',studentId:'01',familyId:'F01',actorUid:'t1',
+   status:'pass',resolution:'none',issueTypes:[],note:'',createdAt:serverTimestamp(),
+ });
+ await assertSucceeds(batch.commit());
+ assert.equal((await getDoc(doc(db,'inspection_final','2026-11__01'))).data().status,'pass');
+ assert.equal((await getDoc(doc(db,'inspection_round2','2026-11__01'))).data().status,'issue');
+ assert.equal((await getDoc(doc(db,'inspections','2026-11__01'))).data().status,'issue');
+});
+test('final round accepts absent second pass and is not available to passed/uninspected students',async()=>{
+ const previous={roundId:'2026-11',studentId:'01',familyId:'F01',status:'not_checked',issueTypes:[],
+   note:'',resolution:'none',createdBy:'t1',updatedBy:'t1',createdAt:now,updatedAt:now};
+ await env.withSecurityRulesDisabled(async ctx=>{
+   await setDoc(doc(ctx.firestore(),'inspection_round2','2026-11__01'),previous);
+ });
+ await assertSucceeds(setDoc(doc(as('t1'),'inspection_final','2026-11__01'),inspection('01','F01','t1')));
+ await assertFails(setDoc(doc(as('t1'),'inspection_final','2026-11__02'),inspection('02','F02','t1')));
+ await env.withSecurityRulesDisabled(async ctx=>{
+   await setDoc(doc(ctx.firestore(),'inspection_round2','2026-11__01'),{...previous,status:'pass'});
+ });
+ await assertFails(setDoc(doc(as('t1'),'inspection_final','2026-11__01'),inspection('01','F01','t1')));
 });

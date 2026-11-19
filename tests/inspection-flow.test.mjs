@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { secondRoundEligible, secondRoundCandidates, inspectionProgress } from '../src/utils/inspection-flow.js';
+import { secondRoundEligible, secondRoundCandidates, finalRoundEligible, finalRoundCandidates, thaiMonthLabel, inspectionProgress } from '../src/utils/inspection-flow.js';
 const students=[{studentId:'1',active:true},{studentId:'2',active:true},{studentId:'3',active:false},{studentId:'4'}];
 test('students marked failed or absent in round one enter round two',()=>{
  const primary={1:{status:'not_checked'},2:{status:'issue'},3:{status:'not_checked'}};
@@ -24,4 +24,20 @@ test('no student without a failed/absent first-round record appears in second-ro
  const roster=[{studentId:'01',active:true},{studentId:'02',active:true},{studentId:'03',active:true},{studentId:'04',active:true}];
  const primary={'01':{status:'issue',issueTypes:['hair']},'02':{status:'pass'},'04':{status:'not_checked'}};
  assert.deepEqual(secondRoundCandidates(roster,primary).map(s=>s.studentId),['01','04']);
+});
+
+
+test('final round contains only failed and absent students in round two',()=>{
+ const roster=[{studentId:'a',active:true},{studentId:'b',active:true},{studentId:'c',active:true},{studentId:'d',active:true},{studentId:'e',active:false}];
+ const second={a:{status:'issue'},b:{status:'not_checked'},c:{status:'pass'},e:{status:'issue'}};
+ assert.deepEqual(finalRoundCandidates(roster,second).map(s=>s.studentId),['a','b']);
+ assert.equal(finalRoundEligible({status:'issue'}),true);
+ assert.equal(finalRoundEligible({status:'not_checked'}),true);
+ assert.equal(finalRoundEligible({status:'pass'}),false);
+ assert.equal(finalRoundEligible(undefined),false);
+});
+test('monthly headings preserve Thai Buddhist year and existing Firestore month ids',()=>{
+ assert.equal(thaiMonthLabel('2026-11'),'พฤศจิกายน 2569');
+ assert.equal(thaiMonthLabel('2027-02'),'กุมภาพันธ์ 2570');
+ assert.equal(thaiMonthLabel('custom-round'),'custom-round');
 });

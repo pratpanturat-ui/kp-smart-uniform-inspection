@@ -16,7 +16,7 @@ import { OFFICIAL_FAMILIES, missingOrPlaceholderFamilies } from './data/family-c
 import { usernameToEmail, validateUsername, validateStaffPassword } from './utils/staff-auth';
 import { ISSUE_TYPES, STATUS_META, prettyError, summarize, normalizeStudent, validateStudent } from './utils/domain';
 import { parseCSV, saveText, toCSV } from './utils/csv';
-import { secondRoundEligible, secondRoundCandidates, inspectionProgress } from './utils/inspection-flow';
+import { secondRoundEligible, secondRoundCandidates, finalRoundEligible, finalRoundCandidates, inspectionProgress, thaiMonthLabel } from './utils/inspection-flow';
 
 const cn = (...names) => names.filter(Boolean).join(' ');
 const primaryButton = 'btn btn-primary';
@@ -80,7 +80,7 @@ function Login() {
       </form>}
       <p className="text-xs text-slate-500 mt-6 leading-relaxed text-center">เฉพาะผู้ที่ได้รับสิทธิ์จากผู้ดูแลระบบเท่านั้น หากลืมรหัสผ่าน กรุณาติดต่อ Admin</p>
     </div>
-    <div className="login-footer">KP Smart Uniform Inspection · Version 0.4.2</div>
+    <div className="login-footer">KP Smart Uniform Inspection · Version 0.5.0</div>
   </div>;
 }
 function MissingProfile({ email }) {
@@ -115,9 +115,11 @@ function AppShell() {
   const [firebaseUser, setFirebaseUser] = useState(undefined);
   const [profile, setProfile] = useState(undefined);
   const [tab,setTab] = useState('overview');
+  const [selectedPhase,setSelectedPhase] = useState(1);
   const [families,setFamilies] = useState([]); const [rounds,setRounds] = useState([]);
   const [students,setStudents] = useState([]); const [inspections,setInspections] = useState([]);
   const [roundTwoInspections,setRoundTwoInspections] = useState([]);
+  const [finalInspections,setFinalInspections] = useState([]);
   const [teachers,setTeachers] = useState([]);
   const [selectedFamily,setSelectedFamily] = useState(''); const [selectedRound,setSelectedRound] = useState('');
   const [search,setSearch] = useState(''); const [statusFilter,setStatusFilter] = useState('all');
@@ -200,6 +202,10 @@ function AppShell() {
     return watchCollection('inspection_round2',inspectionQuery(selectedRound),setRoundTwoInspections,err=>showToast(prettyError(err),'error'));
   },[profile?.active,profile?.role,selectedRound]);
   useEffect(()=>{
+    if (!profile?.active || !selectedRound) {setFinalInspections([]);return;}
+    return watchCollection('inspection_final',inspectionQuery(selectedRound),setFinalInspections,err=>showToast(prettyError(err),'error'));
+  },[profile?.active,profile?.role,selectedRound]);
+  useEffect(()=>{
     if (!isAdmin) {setTeachers([]);return;}
     return watchCollection('users',[],setTeachers,err=>showToast(prettyError(err),'error'));
   },[isAdmin]);
@@ -210,6 +216,13 @@ function AppShell() {
   const displayedInspections = useMemo(()=>inspections.filter(i=>!selectedFamily || i.familyId===selectedFamily),[inspections,selectedFamily]);
   const records = useMemo(()=>Object.fromEntries(displayedInspections.map(i=>[i.studentId,i])),[displayedInspections]);
   const roundTwoRecords = useMemo(()=>Object.fromEntries(roundTwoInspections.map(i=>[i.studentId,i])),[roundTwoInspections]);
+  const finalRecords = useMemo(()=>Object.fromEntries(finalInspections.map(i=>[i.studentId,i])),[finalInspections]);
+  const primaryAllRecords = useMemo(()=>Object.fromEntries(inspections.map(i=>[i.studentId,i])),[inspections]);
+  const selectedPhaseRecords = selectedPhase===3?finalRecords:selectedPhase===2?roundTwoRecords:records;
+  const sourceRecords = selectedPhase===3?roundTwoRecords:records;
+  const allSourceRecords = selectedPhase===3?roundTwoInspections:inspections;
+  const monthlyRounds = useMemo(()=>[...rounds].sort((a,b)=>b.id.localeCompare(a.id)),[rounds]);
+  const monthlyCounts = useMemo(()=>({first:students.filter(s=>s.active!==false).length,second:secondRoundCandidates(students,primaryAllRecords).length,final:finalRoundCandidates(students,roundTwoRecords).length}),[students,primaryAllRecords,roundTwoRecords]);
   const stats = useMemo(()=>summarize(displayedStudents,displayedInspections),[displayedStudents,displayedInspections]);
   const chosenRound = rounds.find(r=>r.id===selectedRound);
   const currentFamily = families.find(f=>f.id===selectedFamily);
@@ -220,7 +233,8 @@ function AppShell() {
     setSavingId(student.studentId);
     try {
       if (phase===2 && !secondRoundEligible(records[student.studentId])) throw Error('ตรวจรอบ 2 ได้เฉพาะนักเรียนที่ไม่ผ่านหรือไม่มาในรอบแรก');
-      const original = phase === 2 ? roundTwoRecords[student.studentId] : records[student.studentId];
+      if (phase===3 && !finalRoundEligible(roundTwoRecords[student.studentId])) throw Error('ตรวจรอบสุดท้ายได้เฉพาะนักเรียนที่ไม่ผ่านหรือไม่มาในรอบที่ 2');
+      const original = phase===3?finalRecords[student.studentId]:phase===2?roundTwoRecords[student.studentId]:records[student.studentId];
       if (phase===1 && original?.status==='issue' && changes.status!=='issue') throw Error('นักเรียนที่ไม่ผ่านต้องใช้เมนูติดตามการแก้ไข');
       await saveInspection({user:firebaseUser,roundId:selectedRound,student,old:original,phase,...changes});
       setIssueStudent(null); showToast(`บันทึกผลตรวจ ${student.name} เรียบร้อย`);
@@ -228,13 +242,14 @@ function AppShell() {
     finally {setSavingId(null);}
   }
   function exportReport() {
-    const headers = ['roundId','studentId','name','room','familyId','familyName','status','issueTypes','resolution','note','round2Status','round2IssueTypes','round2Note'];
+    const headers = ['roundId','studentId','name','room','familyId','familyName','status','issueTypes','resolution','note','round2Status','round2IssueTypes','round2Note','finalStatus','finalIssueTypes','finalNote'];
     const rows = displayedStudents.map(s=>{const r=records[s.studentId];return {
       roundId:selectedRound,studentId:s.studentId,name:s.name,room:s.room,familyId:s.familyId,
       familyName:familyMap[s.familyId]||s.familyId,status:r?.status||'not_inspected',
       issueTypes:(r?.issueTypes||[]).map(id=>ISSUE_TYPES.find(t=>t.id===id)?.label||id).join(' / '),
       resolution:r?.resolution||'',note:r?.note||'',round2Status:roundTwoRecords[s.studentId]?.status||'',
       round2IssueTypes:(roundTwoRecords[s.studentId]?.issueTypes||[]).join(' / '),round2Note:roundTwoRecords[s.studentId]?.note||'',
+      finalStatus:finalRecords[s.studentId]?.status||'',finalIssueTypes:(finalRecords[s.studentId]?.issueTypes||[]).join(' / '),finalNote:finalRecords[s.studentId]?.note||'',
     };});
     saveText(`KP-Uniform-${selectedRound}-${selectedFamily||'ALL'}.csv`,toCSV(headers,rows));
   }
@@ -244,8 +259,7 @@ function AppShell() {
   if (!profile?.active) return <MissingProfile email={firebaseUser.email}/>;
   const nav = [
     {id:'overview',label:'ภาพรวม',icon:LayoutDashboard},
-    {id:'inspection',label:'ตรวจรอบที่ 1',icon:ClipboardCheck},
-    {id:'round2',label:'ตรวจรอบที่ 2',icon:RotateCcw},
+    {id:'inspection',label:'ตรวจประจำเดือน',icon:ClipboardCheck},
     {id:'followup',label:'ติดตามการแก้ไข',icon:ListChecks},
     {id:'students',label:'จัดการรายชื่อนักเรียน',icon:UserPlus},
     {id:'admin',label:'ตั้งค่าระบบ',icon:Settings},
@@ -254,7 +268,14 @@ function AppShell() {
     <aside className={cn('sidebar',menuOpen && 'sidebar-open')}>
       <div className="sidebar-brand"><div className="brand-logo"><Shirt className="size-6"/></div><div><b>KP SMART</b><small>UNIFORM INSPECTION</small></div></div>
       <p className="sidebar-caption">เมนูหลัก</p>
-      <nav className="nav-list" aria-label="เมนูหลัก">{nav.map(n=><button key={n.id} className={cn('nav-item',tab===n.id && 'nav-item-active')} onClick={()=>{setTab(n.id);setInspectionFamily('');if(['inspection','round2'].includes(n.id))setSelectedFamily('');setMenuOpen(false);}}><n.icon className="size-5"/><span>{n.label}</span>{tab===n.id && <span className="nav-active-dot"/>}</button>)}</nav>
+      <nav className="nav-list" aria-label="เมนูหลัก">{nav.map(n=><button key={n.id} className={cn('nav-item',tab===n.id && 'nav-item-active')} onClick={()=>{setTab(n.id);setInspectionFamily('');if(n.id==='inspection')setSelectedFamily('');setMenuOpen(false);}}><n.icon className="size-5"/><span>{n.label}</span>{tab===n.id && <span className="nav-active-dot"/>}</button>)}</nav>
+      <p className="sidebar-caption sidebar-month-heading">เลือกเดือนที่ตรวจ</p>
+      <nav className="sidebar-month-list" aria-label="เดือนที่ตรวจเครื่องแต่งกาย">
+        {monthlyRounds.map(r=><button type="button" key={r.id} className={cn('sidebar-month',tab==='inspection'&&selectedRound===r.id&&'sidebar-month-active')} onClick={()=>{setSelectedRound(r.id);setSelectedPhase(1);setInspectionFamily('');setSelectedFamily('');setTab('inspection');setMenuOpen(false);}}>
+          <CalendarDays className="size-4 shrink-0"/><span>{thaiMonthLabel(r.id)}<small>{r.status==='open'?'เปิดตรวจ':'ปิดรอบ'}</small></span><ArrowRight className="size-4 shrink-0 ml-auto"/>
+        </button>)}
+        {!monthlyRounds.length&&<p className="sidebar-month-empty">ยังไม่มีเดือนตรวจ กำหนดได้ที่ ตั้งค่าระบบ → รอบตรวจ</p>}
+      </nav>
       <div className="sidebar-bottom"><div className="user-identity"><div className="user-avatar">{profile.name?.slice(0,1)||'ค'}</div><div className="min-w-0"><b className="truncate block">{profile.name}</b><small>{isAdmin ? 'ผู้ดูแลระบบ (Admin)' : 'ครูผู้ตรวจ'}</small></div></div>
         <button className="nav-item logout" onClick={()=>signOut(auth)}><LogOut className="size-5"/>ออกจากระบบ</button></div>
     </aside>
@@ -262,11 +283,21 @@ function AppShell() {
     <div className="content-area"><header className="topbar"><button className="icon-button mobile-menu" onClick={()=>setMenuOpen(true)} aria-label="เปิดเมนู"><Menu className="size-5"/></button><div className="topbar-school"><div className="school-mark"><ShieldCheck className="size-5"/></div><div><strong>โรงเรียนคีรีราษฎร์พัฒนา</strong><span>ระบบงานกิจการนักเรียน · KP Family</span></div></div>
       <div className="topbar-user"><span className="status-dot"/> <span className="hidden sm:inline">{profile.name}</span><Badge kind={isAdmin?'navy':'neutral'}>{isAdmin?'ADMIN':'TEACHER'}</Badge></div></header>
       <main className="main-content">
-        <div className="page-heading"><div><p className="eyebrow">KP SMART UNIFORM INSPECTION</p><h1>{nav.find(n=>n.id===tab)?.label}</h1><p className="page-desc">{tab==='overview'?'สรุปผลการตรวจและติดตามความเรียบร้อยของนักเรียน':tab==='inspection'?'เลือกครอบครัวและตรวจรายชื่อด้วยปุ่มขนาดใหญ่':tab==='round2'?'ติดตามนักเรียนที่ไม่ผ่านหรือไม่มาในรอบแรกของเดือน':tab==='followup'?'ดูแลนักเรียนและติดตามการแก้ไขข้อบกพร่อง':tab==='students'?'เพิ่ม แก้ไข และลบรายชื่อนักเรียน':'จัดการข้อมูลครอบครัว รอบตรวจ และสิทธิ์ครู'}</p></div>
+        <div className="page-heading"><div><p className="eyebrow">KP SMART UNIFORM INSPECTION</p><h1>{nav.find(n=>n.id===tab)?.label}</h1><p className="page-desc">{tab==='overview'?'สรุปผลการตรวจและติดตามความเรียบร้อยของนักเรียน':tab==='inspection'?'เลือกเดือนและตรวจเครื่องแต่งกายทั้ง 3 รอบ':tab==='followup'?'ดูแลนักเรียนและติดตามการแก้ไขข้อบกพร่อง':tab==='students'?'เพิ่ม แก้ไข และลบรายชื่อนักเรียน':'จัดการข้อมูลครอบครัว รอบตรวจ และสิทธิ์ครู'}</p></div>
           {!['admin','students'].includes(tab) && <button className="btn btn-outline print-button" onClick={exportReport} disabled={!selectedRound}><Download className="size-4"/> ส่งออก CSV</button>}
         </div>
-        {!['admin','students'].includes(tab) && <div className="filter-panel"><div className="filter-cell"><label>รอบตรวจ</label><div className="select-wrap"><CalendarDays className="size-4"/><select className="field" value={selectedRound} onChange={e=>setSelectedRound(e.target.value)}><option value="">เลือกรอบตรวจ</option>{[...rounds].sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option value={r.id} key={r.id}>{r.name} · {r.status==='open'?'เปิด':'ปิด'}</option>)}</select><ChevronDown className="select-chevron"/></div></div>
-            {!['inspection','round2'].includes(tab) && <div className="filter-cell"><label>KP Family</label><div className="select-wrap"><Users className="size-4"/><select className="field" value={selectedFamily} onChange={e=>setSelectedFamily(e.target.value)}><option value="">ทุกครอบครัว</option>{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><option key={f.id} value={f.id}>{f.id} — {f.name}</option>)}</select><ChevronDown className="select-chevron"/></div></div>}
+        {tab==='inspection'&&<section className="monthly-round-panel" aria-label="เลือกรอบตรวจของเดือน">
+          <div className="monthly-round-heading"><div><p className="eyebrow">แผนตรวจเครื่องแต่งกายรายเดือน</p><h2>{selectedRound?thaiMonthLabel(selectedRound):'เลือกเดือนจากเมนูด้านซ้าย'}</h2><p>รอบที่ 2 และรอบสุดท้ายจะดึงผู้ที่ไม่ผ่านหรือไม่มาจากรอบก่อนหน้าโดยอัตโนมัติ</p></div>
+            <div className="mobile-month-picker"><label htmlFor="month-select">เลือกเดือน</label><select id="month-select" className="field" value={selectedRound} onChange={e=>{setSelectedRound(e.target.value);setSelectedPhase(1);setInspectionFamily('');setSelectedFamily('');}}><option value="">เลือกเดือน</option>{monthlyRounds.map(r=><option key={r.id} value={r.id}>{thaiMonthLabel(r.id)}</option>)}</select></div>
+          </div>
+          <div className="monthly-round-tabs" role="group" aria-label="เลือกรอบที่ต้องการตรวจ">
+            {[{phase:1,label:'รอบที่ 1',desc:'ตรวจนักเรียนทุกคน',count:monthlyCounts.first},{phase:2,label:'รอบที่ 2',desc:'ไม่ผ่าน / ไม่มาจากรอบ 1',count:monthlyCounts.second},{phase:3,label:'รอบสุดท้าย',desc:'ไม่ผ่าน / ไม่มาจากรอบ 2',count:monthlyCounts.final}].map(item=><button key={item.phase} type="button" aria-pressed={selectedPhase===item.phase} className={cn('monthly-round-button',selectedPhase===item.phase&&'monthly-round-button-active')} disabled={!selectedRound} onClick={()=>{setSelectedPhase(item.phase);setInspectionFamily('');setSelectedFamily('');}}>
+              <span className="monthly-round-name">{item.label}</span><span className="monthly-round-desc">{item.desc}</span><span className="monthly-round-count">{item.count} คน <ArrowRight className="size-4"/></span>
+            </button>)}
+          </div>
+        </section>}
+        {!['admin','students','inspection'].includes(tab) && <div className="filter-panel"><div className="filter-cell"><label>รอบตรวจ</label><div className="select-wrap"><CalendarDays className="size-4"/><select className="field" value={selectedRound} onChange={e=>setSelectedRound(e.target.value)}><option value="">เลือกรอบตรวจ</option>{[...rounds].sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option value={r.id} key={r.id}>{r.name} · {r.status==='open'?'เปิด':'ปิด'}</option>)}</select><ChevronDown className="select-chevron"/></div></div>
+            {<div className="filter-cell"><label>KP Family</label><div className="select-wrap"><Users className="size-4"/><select className="field" value={selectedFamily} onChange={e=>setSelectedFamily(e.target.value)}><option value="">ทุกครอบครัว</option>{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=><option key={f.id} value={f.id}>{f.id} — {f.name}</option>)}</select><ChevronDown className="select-chevron"/></div></div>}
             <div className="filter-round-status"><Badge kind={roundOpen?'pass':'neutral'}>{chosenRound ? (roundOpen?'เปิดให้ตรวจ':'ปิดรอบตรวจ'):'ยังไม่มีรอบตรวจ'}</Badge></div>
           </div>}
         {(studentLoadProblem || familyLoadProblem) && <section className="roster-access-notice" role="alert">
@@ -283,20 +314,20 @@ function AppShell() {
           <div><strong>ฐานข้อมูลยังไม่มีรายชื่อนักเรียน</strong><p>กรุณาตรวจสอบ Collection students ใน Firestore หรือใช้เมนูตั้งค่าระบบ → นำเข้านักเรียน CSV (ไม่ได้ลบข้อมูลใด ๆ อัตโนมัติ)</p></div>
         </section>}
         {loading && !['admin','students'].includes(tab)?<Spinner/> : tab==='overview'?<Overview stats={stats} students={displayedStudents} inspections={displayedInspections} familyMap={familyMap} currentFamily={currentFamily} chosenRound={chosenRound} onInspect={()=>{setInspectionFamily('');setSelectedFamily('');setTab('inspection');}} />
-          :['inspection','round2'].includes(tab)?<Inspection
-              phase={tab==='round2'?2:1} families={families} allStudents={students.filter(s=>s.active!==false)} students={displayedStudents}
-              records={tab==='round2'?roundTwoRecords:records} primaryRecords={records}
-              allPrimaryRecords={inspections} activeFamily={inspectionFamily}
+          :tab==='inspection'?selectedRound?<Inspection
+              phase={selectedPhase} families={families} allStudents={students.filter(s=>s.active!==false)} students={displayedStudents}
+              records={selectedPhaseRecords} primaryRecords={sourceRecords}
+              allPrimaryRecords={allSourceRecords} activeFamily={inspectionFamily}
               onSelectFamily={id=>{setInspectionFamily(id);setSelectedFamily(id);}}
               onBack={()=>{setInspectionFamily('');setSelectedFamily('');}}
               search={search} setSearch={setSearch} statusFilter={statusFilter} setStatusFilter={setStatusFilter}
-              pendingId={savingId} roundOpen={roundOpen} onQuick={write} onIssue={s=>setIssueStudent({student:s,phase:tab==='round2'?2:1})} familyMap={familyMap}/>
+              pendingId={savingId} roundOpen={roundOpen} onQuick={write} onIssue={s=>setIssueStudent({student:s,phase:selectedPhase})} familyMap={familyMap}/> : <Empty title="ยังไม่เลือกเดือนตรวจ" detail="เลือกเดือนจากแถบด้านซ้าย หรือสร้างเดือนในเมนูตั้งค่าระบบ → รอบตรวจ" icon={CalendarDays}/>
           :tab==='followup'?<Followup students={displayedStudents} records={records} savingId={savingId} write={write} roundOpen={roundOpen} />
           :tab==='students'?<StudentsManager students={students} families={families} notify={showToast}/>
           :<Admin families={families} rounds={rounds} teachers={teachers} students={students} notify={showToast} isAdmin={isAdmin} />}
         <footer className="app-footer">KP Smart Uniform Inspection · โรงเรียนคีรีราษฎร์พัฒนา · ข้อมูลนักเรียนใช้ภายในสถานศึกษาเท่านั้น</footer>
       </main></div>
-      {issueStudent && <IssueDialog student={issueStudent.student} record={(issueStudent.phase===2?roundTwoRecords:records)[issueStudent.student.studentId]} pending={savingId===issueStudent.student.studentId} onClose={()=>setIssueStudent(null)} onSave={changes=>write(issueStudent.student,changes,issueStudent.phase)}/>}
+      {issueStudent && <IssueDialog student={issueStudent.student} record={(issueStudent.phase===3?finalRecords:issueStudent.phase===2?roundTwoRecords:records)[issueStudent.student.studentId]} pending={savingId===issueStudent.student.studentId} onClose={()=>setIssueStudent(null)} onSave={changes=>write(issueStudent.student,changes,issueStudent.phase)}/>}
       <Toast text={toast} clear={()=>setToast(null)}/>
     </div>;
 }
@@ -316,25 +347,27 @@ function Overview({stats,students,inspections,familyMap,currentFamily,chosenRoun
 }
 
 function Inspection({phase,families,allStudents,students,records,primaryRecords,allPrimaryRecords,activeFamily,onSelectFamily,onBack,search,setSearch,statusFilter,setStatusFilter,pendingId,roundOpen,onQuick,onIssue,familyMap}) {
-  const inRound2 = phase === 2;
+  const inRecheck = phase > 1;
+  const previousRoundName = phase === 3 ? 'รอบที่ 2' : 'รอบแรก';
+  const phaseName = phase === 3 ? 'รอบสุดท้าย' : `รอบที่ ${phase}`;
   if (!activeFamily) {
     const firstById = Object.fromEntries(allPrimaryRecords.map(r=>[r.studentId,r]));
     return <section className="family-selector">
-      <div className="family-selector-heading"><div><p className="eyebrow">เลือกรายชื่อเพื่อตรวจ</p><h2>{inRound2?'ตรวจรอบที่ 2 — ไม่ผ่าน / ไม่มา':'เลือก KP Family'}</h2><p>{inRound2?'รายการรอบสองรวมนักเรียนที่ไม่ผ่านและไม่มาในรอบแรกของเดือนที่เลือก':'แตะปุ่มครอบครัวด้านล่าง เพื่อเปิดรายชื่อนักเรียน'}</p></div><Badge kind="navy">{families.length} ครอบครัว</Badge></div>
+      <div className="family-selector-heading"><div><p className="eyebrow">เลือกรายชื่อเพื่อตรวจ</p><h2>{inRecheck?`ตรวจ${phaseName} — ไม่ผ่าน / ไม่มา`:'เลือก KP Family'}</h2><p>{inRecheck?`แสดงนักเรียนที่ไม่ผ่านหรือไม่มาใน${previousRoundName}ของเดือนที่เลือก`:'แตะปุ่มครอบครัวด้านล่าง เพื่อเปิดรายชื่อนักเรียน'}</p></div><Badge kind="navy">{families.length} ครอบครัว</Badge></div>
       <div className="family-tile-grid">{[...families].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>{
         const familyStudents=allStudents.filter(s=>s.familyId===f.id);
-        const eligible=inRound2?secondRoundCandidates(familyStudents,firstById):familyStudents;
+        const eligible=phase===3?finalRoundCandidates(familyStudents,firstById):phase===2?secondRoundCandidates(familyStudents,firstById):familyStudents;
         const failed=eligible.filter(s=>firstById[s.studentId]?.status==='issue').length;
         const absent=eligible.filter(s=>firstById[s.studentId]?.status==='not_checked').length;
         return <button type="button" key={f.id} className="family-square" onClick={()=>onSelectFamily(f.id)}>
           <span className="family-square-code">{f.id}</span><span className="family-square-name">{f.name}</span>
-          <span className="family-square-meta">{inRound2?`รอบ 2 ${eligible.length} คน · ไม่ผ่าน ${failed} · ไม่มา ${absent}`:`นักเรียน ${eligible.length} คน`} <ArrowRight className="size-4"/></span>
+          <span className="family-square-meta">{inRecheck?`${phaseName} ${eligible.length} คน · ไม่ผ่าน ${failed} · ไม่มา ${absent}`:`นักเรียน ${eligible.length} คน`} <ArrowRight className="size-4"/></span>
         </button>;
       })}</div>
       {!families.length&&<Empty title="ยังไม่มี KP Family" detail="ติดต่อ Admin เพื่อกำหนดครอบครัวที่รับผิดชอบ" icon={Users}/>}
     </section>;
   }
-  const candidates=(inRound2?secondRoundCandidates(students,primaryRecords):students).slice().sort((a,b)=>a.room.localeCompare(b.room,'th',{numeric:true})||a.name.localeCompare(b.name,'th'));
+  const candidates=(phase===3?finalRoundCandidates(students,primaryRecords):phase===2?secondRoundCandidates(students,primaryRecords):students).slice().sort((a,b)=>a.room.localeCompare(b.room,'th',{numeric:true})||a.name.localeCompare(b.name,'th'));
   const progress=inspectionProgress(candidates,records);
   const filtered=candidates.filter(s=>{
     const r=records[s.studentId]; const st=r?.status||'uninspected';
@@ -346,17 +379,17 @@ function Inspection({phase,families,allStudents,students,records,primaryRecords,
   });
   return <section className="inspection-workspace">
     <div className="inspection-backline"><button className="btn btn-outline" onClick={onBack}><ArrowLeft className="size-4"/> กลับเลือกครอบครัว</button><Badge kind={roundOpen?'pass':'neutral'}>{roundOpen?'รอบเปิดตรวจ':'ปิดรอบ'}</Badge></div>
-    <div className="inspection-title-card"><p className="eyebrow">{inRound2?'ตรวจรอบที่ 2':'ตรวจรอบที่ 1'} · {activeFamily}</p><h2>{familyMap[activeFamily]||activeFamily}</h2><p>{inRound2?'นักเรียนที่ไม่ผ่านหรือไม่มาในรอบแรก — ผลรอบ 2 บันทึกแยก ไม่เปลี่ยนผลรอบแรก':'เลือกสถานะใต้ชื่อนักเรียน ระบบบันทึกทันทีเมื่อกด'}</p>
+    <div className="inspection-title-card"><p className="eyebrow">{phaseName} · {activeFamily}</p><h2>{familyMap[activeFamily]||activeFamily}</h2><p>{inRecheck?`นักเรียนที่ไม่ผ่านหรือไม่มาใน${previousRoundName} — เก็บผล${phaseName}แยก ไม่เปลี่ยนผลเดิม`:'เลือกสถานะใต้ชื่อนักเรียน ระบบบันทึกทันทีเมื่อกด'}</p>
       <div className="inspection-mini-stats"><span>ทั้งหมด <b>{progress.total}</b></span><span>ผ่าน <b>{progress.pass}</b></span><span>ไม่ผ่าน <b>{progress.issue}</b></span><span>ไม่มา <b>{progress.absent}</b></span><span>รอตรวจ <b>{progress.uninspected}</b></span></div>
     </div>
     {!roundOpen&&<div className="warning-banner"><AlertTriangle className="size-4 shrink-0"/>รอบตรวจนี้ปิดแล้ว ต้องเปิดรอบก่อนบันทึกผล</div>}
     <div className="inspection-search"><Search className="size-5"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="ค้นหาชื่อ / ห้อง / รหัสนักเรียน" aria-label="ค้นหานักเรียน"/></div>
-    <div className="inspection-status-tabs">{[{id:'all',label:'ทั้งหมด'},{id:'uninspected',label:'ยังไม่ตรวจ'},{id:'pass',label:inRound2?'ผ่านรอบ 2':'ผ่าน'},{id:'issue',label:inRound2?'ไม่ผ่านรอบ 2':'ไม่ผ่าน'},{id:'absent',label:inRound2?'ไม่มารอบ 2':'ไม่มา'}].map(t=><button key={t.id} className={statusFilter===t.id?'selected':''} onClick={()=>setStatusFilter(t.id)}>{t.label}</button>)}</div>
+    <div className="inspection-status-tabs">{[{id:'all',label:'ทั้งหมด'},{id:'uninspected',label:'ยังไม่ตรวจ'},{id:'pass',label:inRecheck?`ผ่าน${phaseName}`:'ผ่าน'},{id:'issue',label:inRecheck?`ไม่ผ่าน${phaseName}`:'ไม่ผ่าน'},{id:'absent',label:inRecheck?`ไม่มา${phaseName}`:'ไม่มา'}].map(t=><button key={t.id} className={statusFilter===t.id?'selected':''} onClick={()=>setStatusFilter(t.id)}>{t.label}</button>)}</div>
     <div className="mobile-student-list">{filtered.map((s,index)=>{const r=records[s.studentId],st=r?.status,busy=pendingId===s.studentId;
       return <article className="mobile-student-card" key={s.studentId}>
         <div className="mobile-student-head"><div className="mobile-student-avatar">{String(index+1).padStart(2,'0')}</div><div className="mobile-student-info"><strong>{s.name}</strong><small>{s.room} · รหัส {s.studentId}</small></div><Badge kind={st?STATUS_META[st]?.badge||'neutral':'neutral'}>{st==='not_checked'?'ไม่มา':st==='issue'?'ไม่ผ่าน':st==='pass'?'ผ่าน':'รอตรวจ'}</Badge></div>
-        {inRound2&&<div className={cn('mobile-primary-result',primaryRecords[s.studentId]?.status==='issue'?'mobile-primary-failed':'mobile-primary-absent')}>
-          <strong>ผลรอบแรก: {primaryRecords[s.studentId]?.status==='issue'?'ไม่ผ่าน':'ไม่มา'}</strong>
+        {inRecheck&&<div className={cn('mobile-primary-result',primaryRecords[s.studentId]?.status==='issue'?'mobile-primary-failed':'mobile-primary-absent')}>
+          <strong>ผล{previousRoundName}: {primaryRecords[s.studentId]?.status==='issue'?'ไม่ผ่าน':'ไม่มา'}</strong>
           {primaryRecords[s.studentId]?.status==='issue'&&<span>สาเหตุ: {(primaryRecords[s.studentId]?.issueTypes||[]).map(id=>ISSUE_TYPES.find(t=>t.id===id)?.label||id).join(' · ')||'ไม่ได้ระบุสาเหตุ'}</span>}
           {primaryRecords[s.studentId]?.note&&<span>หมายเหตุ: {primaryRecords[s.studentId].note}</span>}
         </div>}
@@ -367,7 +400,7 @@ function Inspection({phase,families,allStudents,students,records,primaryRecords,
           <button type="button" disabled={!roundOpen||busy||st==='issue'} className={cn('mobile-check-button mobile-check-absent',st==='not_checked'&&'chosen')} onClick={()=>onQuick(s,{status:'not_checked',resolution:'none'},phase)}><Clock3 className="size-5"/> ไม่มา</button>
         </div>
       </article>;
-    })}{!filtered.length&&<Empty title={inRound2&&candidates.length===0?'ไม่มีนักเรียนที่ต้องตรวจรอบ 2':'ไม่มีรายชื่อตามเงื่อนไข'} detail={inRound2&&candidates.length===0?'นักเรียนที่บันทึกว่า “ไม่ผ่าน” หรือ “ไม่มา” ในรอบแรกของเดือนนี้จะปรากฏที่นี่อัตโนมัติ':'ลองเปลี่ยนตัวกรองหรือคำค้นหา'} icon={CheckCircle2}/>}</div>
+    })}{!filtered.length&&<Empty title={inRecheck&&candidates.length===0?`ไม่มีนักเรียนที่ต้องตรวจ${phaseName}`:'ไม่มีรายชื่อตามเงื่อนไข'} detail={inRecheck&&candidates.length===0?`นักเรียนที่บันทึกว่า “ไม่ผ่าน” หรือ “ไม่มา” ใน${previousRoundName}ของเดือนนี้จะปรากฏที่นี่อัตโนมัติ`:'ลองเปลี่ยนตัวกรองหรือคำค้นหา'} icon={CheckCircle2}/>}</div>
     <div className="inspection-note"><AlertCircle className="size-4"/> “ไม่มา” หมายถึงไม่อยู่ให้ตรวจเครื่องแต่งกายในรอบนั้น ไม่ใช่การบันทึกขาดเรียนในระบบสแกนหน้า</div>
   </section>;
 }

@@ -17,3 +17,19 @@ export function inspectionProgress(students, records = {}) {
   }
   return counts;
 }
+
+/** Final monthly inspection only includes students still failed/absent in round two. */
+export function finalRoundEligible(second) {
+  return second?.status === 'issue' || second?.status === 'not_checked';
+}
+export function finalRoundCandidates(students, secondByStudent) {
+  return students.filter(s => s.active !== false && finalRoundEligible(secondByStudent[s.studentId]));
+}
+
+/** Existing inspection_rounds document IDs are the month identifiers (YYYY-MM). */
+export function thaiMonthLabel(monthId) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthId || '')) return monthId || 'ไม่ระบุเดือน';
+  const [year, month] = monthId.split('-').map(Number);
+  return new Intl.DateTimeFormat('th-TH', {month: 'long', year: 'numeric', timeZone: 'UTC'})
+    .format(new Date(Date.UTC(year, month - 1, 1)));
+}

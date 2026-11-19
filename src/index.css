@@ -80,3 +80,25 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .mobile-primary-failed { background: #fff0ed; color: #943c32; }
 .mobile-primary-absent { background: #f1f5f9; color: #475569; }
 .mobile-primary-result span { width: 100%; }
+
+
+/* v0.5 — Month-first navigation with three independent monthly inspection passes. */
+.sidebar-month-heading{margin-top:24px;margin-bottom:10px}
+.sidebar-month-list{padding:0 12px 12px;display:flex;flex-direction:column;gap:5px;overflow-y:auto;min-height:0;max-height:40vh;scrollbar-width:thin;scrollbar-color:#416679 transparent}
+.sidebar-month{display:flex;align-items:center;gap:10px;text-align:left;width:100%;padding:10px 12px;min-height:56px;color:#abc4d0;border:1px solid #ffffff14;background:#ffffff09;border-radius:11px}
+.sidebar-month span{font-size:13px;line-height:1.35;font-weight:750}.sidebar-month small{display:block;font-size:10px;font-weight:500;color:#9cb4c2;margin-top:3px}
+.sidebar-month:hover,.sidebar-month-active{background:#25617d;color:#fff;border-color:#83d0e45e}.sidebar-month-active small{color:#c8f2f3}
+.sidebar-month-empty{font-size:12px;color:#90abbd;line-height:1.6;padding:8px 12px}
+.monthly-round-panel{background:#fff;border:1px solid #dce9f1;border-radius:19px;padding:20px;margin-bottom:22px;box-shadow:0 6px 22px #153b5209}
+.monthly-round-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+.monthly-round-heading h2{font-size:23px;font-weight:850;color:#153d52}.monthly-round-heading p:not(.eyebrow){color:#6d8290;font-size:12px;margin-top:5px;line-height:1.5}
+.mobile-month-picker{display:none}
+.monthly-round-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+.monthly-round-button{background:#f7fafc;text-align:left;border:1.5px solid #dce8ee;border-radius:14px;min-height:120px;padding:16px;display:flex;flex-direction:column;align-items:stretch;gap:6px;transition:background .15s,border-color .15s}
+.monthly-round-button:hover{background:#eff7fa;border-color:#80b4c6}.monthly-round-button-active{background:linear-gradient(140deg,#145d79,#277f92);border-color:#155e7a;color:white;box-shadow:0 6px 19px #124f6824}
+.monthly-round-name{font-weight:850;font-size:19px}.monthly-round-desc{font-size:11px;color:#788a99;line-height:1.5;flex:1}.monthly-round-button-active .monthly-round-desc{color:#d4edf3}
+.monthly-round-count{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:800;margin-top:6px}
+.monthly-round-button-active .monthly-round-count{color:#ddfff2}
+@media(max-width:980px){.sidebar-month-list{max-height:50vh}.mobile-month-picker{display:flex;flex-direction:column;min-width:200px;gap:4px}.mobile-month-picker label{font-size:11px;font-weight:750;color:#556f80}}
+@media(max-width:700px){.monthly-round-panel{padding:15px;border-radius:15px}.monthly-round-heading{align-items:stretch;flex-direction:column}.monthly-round-heading h2{font-size:19px}.mobile-month-picker{min-width:0;width:100%}.monthly-round-tabs{gap:7px}.monthly-round-button{min-height:121px;padding:12px 9px;border-radius:11px}.monthly-round-name{font-size:15px}.monthly-round-desc{font-size:10px}.monthly-round-count{font-size:11px}}
+@media(max-width:390px){.monthly-round-button{padding:10px 7px}.monthly-round-name{font-size:13px}}

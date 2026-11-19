@@ -70,6 +70,12 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.status in ['issue', 'not_checked']
         && get(/databases/$(database)/documents/inspections/$(data.roundId + '__' + data.studentId)).data.familyId == data.familyId;
     }
+    // Final pass requires an explicit failed/absent result in round two of this month.
+    function roundTwoNeedsFinal(data) {
+      return exists(/databases/$(database)/documents/inspection_round2/$(data.roundId + '__' + data.studentId))
+        && get(/databases/$(database)/documents/inspection_round2/$(data.roundId + '__' + data.studentId)).data.status in ['issue','not_checked']
+        && get(/databases/$(database)/documents/inspection_round2/$(data.roundId + '__' + data.studentId)).data.familyId == data.familyId;
+    }
     function validInspection(data) {
       return data.keys().hasAll(['roundId','studentId','familyId','status','issueTypes',
         'note','resolution','createdBy','createdAt','updatedBy','updatedAt'])
@@ -230,6 +236,57 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/inspection_round2/$(request.resource.data.inspectionId)).data.note == request.resource.data.note;
       allow update, delete: if false;
     }
+
+    match /inspection_final/{inspectionId} {
+      allow read: if active();
+      allow create: if validInspection(request.resource.data)
+        && inspectionId == request.resource.data.roundId + '__' + request.resource.data.studentId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && active()
+        && roundOpen(request.resource.data.roundId)
+        && studentMatches(request.resource.data)
+        && roundTwoNeedsFinal(request.resource.data);
+      allow update: if validInspection(request.resource.data)
+        && request.resource.data.roundId == resource.data.roundId
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status','issueTypes','note','resolution','updatedBy','updatedAt'])
+        && active()
+        && roundOpen(resource.data.roundId)
+        && studentMatches(resource.data)
+        && roundTwoNeedsFinal(resource.data);
+      allow delete: if false;
+    }
+
+
+    match /inspection_final_events/{eventId} {
+      allow read: if active();
+      // Append-only operational change log. For tamper-proof logs, use trusted backend later.
+      allow create: if validEvent(request.resource.data, eventId)
+        && active()
+        && roundOpen(request.resource.data.roundId)
+        && roundTwoNeedsFinal(request.resource.data)
+        && existsAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId))
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.updatedBy == request.auth.uid
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.roundId == request.resource.data.roundId
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.studentId == request.resource.data.studentId
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.familyId == request.resource.data.familyId
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.status == request.resource.data.status
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.resolution == request.resource.data.resolution
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.issueTypes == request.resource.data.issueTypes
+        && getAfter(/databases/$(database)/documents/inspection_final/$(request.resource.data.inspectionId)).data.note == request.resource.data.note;
+      allow update, delete: if false;
+    }
+
 
     match /{document=**} { allow read, write: if false; }
   }

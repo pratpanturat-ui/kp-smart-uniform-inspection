@@ -69,8 +69,10 @@ export function inspectionQuery(roundId) {
 }
 export async function saveInspection({ user, roundId, student, old, status, issueTypes = [], note = '', resolution = 'none', phase = 1 }) {
   const key = inspectionId(roundId, student.studentId);
-  const recordRef = doc(db, phase === 2 ? 'inspection_round2' : 'inspections', key);
-  const eventRef = doc(collection(db, phase === 2 ? 'inspection_round2_events' : 'inspection_events'));
+  const collectionName = phase === 3 ? 'inspection_final' : phase === 2 ? 'inspection_round2' : 'inspections';
+  const eventCollection = phase === 3 ? 'inspection_final_events' : phase === 2 ? 'inspection_round2_events' : 'inspection_events';
+  const recordRef = doc(db, collectionName, key);
+  const eventRef = doc(collection(db, eventCollection));
   const now = serverTimestamp();
   const record = {
     roundId, studentId: student.studentId, familyId: student.familyId,
