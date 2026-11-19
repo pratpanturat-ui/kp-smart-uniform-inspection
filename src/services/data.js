@@ -162,6 +162,24 @@ export async function upsertStudents(rows, onProgress) {
     onProgress?.(done, rows.length);
   }
 }
+/** Fetch an authoritative whole-school snapshot for PDF export.
+ * Uses month-only Firestore queries (no compound index required) and never
+ * applies the family selection from the inspection screen.
+ */
+export async function loadFailedReportSource(monthId, phase) {
+  const reportCollections = {1:'inspections', 2:'inspection_round2', 3:'inspection_final'};
+  const collectionName = reportCollections[phase];
+  if (!collectionName || !/^\d{4}-(0[1-9]|1[0-2])$/.test(monthId || ''))
+    throw new Error('กรุณาเลือกเดือนและรอบตรวจที่ถูกต้อง');
+  const [studentSnapshot, familySnapshot, inspectionSnapshot] = await Promise.all([
+    getDocs(collection(db,'students')),
+    getDocs(collection(db,'families')),
+    getDocs(query(collection(db,collectionName),where('roundId','==',monthId))),
+  ]);
+  const toRows = snapshot => snapshot.docs.map(d => ({id:d.id,...d.data()}));
+  return {students:toRows(studentSnapshot), families:toRows(familySnapshot), inspections:toRows(inspectionSnapshot)};
+}
+
 export async function loadInspectorsForRound(roundId) {
   const s = await getDocs(query(collection(db, 'inspections'), where('roundId', '==', roundId)));
   return s.docs.map(d => ({ id: d.id, ...d.data() }));

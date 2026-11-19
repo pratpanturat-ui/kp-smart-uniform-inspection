@@ -3,15 +3,16 @@ import {
   LayoutDashboard, ClipboardCheck, ListChecks, Settings, LogOut, ShieldCheck, Users,
   CalendarDays, Search, CheckCircle2, AlertCircle, Clock3, Download, Upload,
   ChevronDown, Plus, X, Check, Save, BookOpen, LockKeyhole, Shirt, LoaderCircle,
-  RefreshCw, FileSpreadsheet, Eye, AlertTriangle, Menu, ArrowLeft, UserPlus, Pencil, Trash2, RotateCcw, ArrowRight,
+  RefreshCw, FileSpreadsheet, Eye, AlertTriangle, Menu, ArrowLeft, UserPlus, Pencil, Trash2, RotateCcw, ArrowRight, FileDown,
 } from 'lucide-react';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, onSnapshot, where } from 'firebase/firestore';
 import { auth, configured, db } from './services/firebase';
 import { inspectionQuery, saveInspection, updateFamily, ensureOfficialFamilies, updateRound,
   updateTeacher, upsertStudents, saveStudent, setStudentActive, watchCollection,
-  watchStudentRoster, getFamilyDocuments } from './services/data';
+  watchStudentRoster, getFamilyDocuments, loadFailedReportSource } from './services/data';
 import { createStaffAccount } from './services/staff-users';
+import { downloadFailedStudentsPdf } from './services/pdf-report';
 import { OFFICIAL_FAMILIES, missingOrPlaceholderFamilies } from './data/family-config';
 import { usernameToEmail, validateUsername, validateStaffPassword } from './utils/staff-auth';
 import { ISSUE_TYPES, STATUS_META, prettyError, summarize, normalizeStudent, validateStudent } from './utils/domain';
@@ -80,7 +81,7 @@ function Login() {
       </form>}
       <p className="text-xs text-slate-500 mt-6 leading-relaxed text-center">เฉพาะผู้ที่ได้รับสิทธิ์จากผู้ดูแลระบบเท่านั้น หากลืมรหัสผ่าน กรุณาติดต่อ Admin</p>
     </div>
-    <div className="login-footer">KP Smart Uniform Inspection · Version 0.5.0</div>
+    <div className="login-footer">KP Smart Uniform Inspection · Version 0.6.0</div>
   </div>;
 }
 function MissingProfile({ email }) {
@@ -129,6 +130,7 @@ function AppShell() {
   const [studentLoadProblem,setStudentLoadProblem] = useState(null);
   const [familyLoadProblem,setFamilyLoadProblem] = useState(null);
   const [menuOpen,setMenuOpen] = useState(false);
+  const [pdfExporting,setPdfExporting] = useState(false);
   const isAdmin = profile?.role === 'admin';
   const showToast = (message,type = 'success') => setToast({ message,type });
   useEffect(()=>{ if (!configured || !auth) { setFirebaseUser(null); return; } return onAuthStateChanged(auth, user=>{setProfile(undefined);setFirebaseUser(user);}); }, []);
@@ -241,6 +243,22 @@ function AppShell() {
     } catch(err) { showToast(prettyError(err),'error'); }
     finally {setSavingId(null);}
   }
+  async function exportFailedPdf() {
+    if (!selectedRound || pdfExporting) return;
+    setPdfExporting(true);
+    const monthId = selectedRound, phase = selectedPhase;
+    try {
+      // Fetch directly from Firestore to guarantee the report includes every
+      // KP Family, even if the user is currently viewing only one family.
+      const source = await loadFailedReportSource(monthId, phase);
+      const count = await downloadFailedStudentsPdf({monthId,phase,...source});
+      showToast(`ดาวน์โหลดรายงานผู้ไม่ผ่าน ${count} คน ครบทุกครอบครัวเรียบร้อย`);
+    } catch(error) {
+      showToast(error?.code==='permission-denied'
+        ? 'ไม่สามารถอ่านรายชื่อทุกครอบครัวเพื่อสร้าง PDF ได้ กรุณา Deploy Firestore Rules เวอร์ชันล่าสุด'
+        : `สร้างไฟล์ PDF ไม่สำเร็จ: ${prettyError(error)}`, 'error');
+    } finally {setPdfExporting(false);}
+  }
   function exportReport() {
     const headers = ['roundId','studentId','name','room','familyId','familyName','status','issueTypes','resolution','note','round2Status','round2IssueTypes','round2Note','finalStatus','finalIssueTypes','finalNote'];
     const rows = displayedStudents.map(s=>{const r=records[s.studentId];return {
@@ -294,6 +312,14 @@ function AppShell() {
             {[{phase:1,label:'รอบที่ 1',desc:'ตรวจนักเรียนทุกคน',count:monthlyCounts.first},{phase:2,label:'รอบที่ 2',desc:'ไม่ผ่าน / ไม่มาจากรอบ 1',count:monthlyCounts.second},{phase:3,label:'รอบสุดท้าย',desc:'ไม่ผ่าน / ไม่มาจากรอบ 2',count:monthlyCounts.final}].map(item=><button key={item.phase} type="button" aria-pressed={selectedPhase===item.phase} className={cn('monthly-round-button',selectedPhase===item.phase&&'monthly-round-button-active')} disabled={!selectedRound} onClick={()=>{setSelectedPhase(item.phase);setInspectionFamily('');setSelectedFamily('');}}>
               <span className="monthly-round-name">{item.label}</span><span className="monthly-round-desc">{item.desc}</span><span className="monthly-round-count">{item.count} คน <ArrowRight className="size-4"/></span>
             </button>)}
+          </div>
+          <div className="monthly-report-export">
+            <div><strong>รายงานรายชื่อนักเรียนไม่ผ่าน · {selectedPhase===3?'รอบสุดท้าย':`รอบที่ ${selectedPhase}`}</strong>
+              <p>รวมทุก KP Family ในเดือนนี้ · ไม่รวมผู้ที่ผ่านหรือไม่มา · PDF A4 แนวนอน</p></div>
+            <button type="button" className="btn btn-primary monthly-pdf-button" onClick={exportFailedPdf} disabled={!selectedRound || pdfExporting}>
+              {pdfExporting?<LoaderCircle className="size-4 animate-spin"/>:<FileDown className="size-4"/>}
+              {pdfExporting?'กำลังสร้าง PDF...':'ดาวน์โหลด PDF รายชื่อไม่ผ่าน (ทุกครอบครัว)'}
+            </button>
           </div>
         </section>}
         {!['admin','students','inspection'].includes(tab) && <div className="filter-panel"><div className="filter-cell"><label>รอบตรวจ</label><div className="select-wrap"><CalendarDays className="size-4"/><select className="field" value={selectedRound} onChange={e=>setSelectedRound(e.target.value)}><option value="">เลือกรอบตรวจ</option>{[...rounds].sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option value={r.id} key={r.id}>{r.name} · {r.status==='open'?'เปิด':'ปิด'}</option>)}</select><ChevronDown className="select-chevron"/></div></div>

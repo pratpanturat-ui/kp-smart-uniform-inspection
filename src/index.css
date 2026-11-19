@@ -102,3 +102,9 @@ button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:980px){.sidebar-month-list{max-height:50vh}.mobile-month-picker{display:flex;flex-direction:column;min-width:200px;gap:4px}.mobile-month-picker label{font-size:11px;font-weight:750;color:#556f80}}
 @media(max-width:700px){.monthly-round-panel{padding:15px;border-radius:15px}.monthly-round-heading{align-items:stretch;flex-direction:column}.monthly-round-heading h2{font-size:19px}.mobile-month-picker{min-width:0;width:100%}.monthly-round-tabs{gap:7px}.monthly-round-button{min-height:121px;padding:12px 9px;border-radius:11px}.monthly-round-name{font-size:15px}.monthly-round-desc{font-size:10px}.monthly-round-count{font-size:11px}}
 @media(max-width:390px){.monthly-round-button{padding:10px 7px}.monthly-round-name{font-size:13px}}
+
+/* v0.6 - Whole-school failed-inspection PDF export per monthly phase. */
+.monthly-report-export{margin-top:16px;padding:15px 16px;border-radius:13px;border:1px solid #d7e5de;background:#f5faf7;display:flex;justify-content:space-between;gap:15px;align-items:center}
+.monthly-report-export strong{color:#185a45;font-size:13px}.monthly-report-export p{margin:4px 0 0;font-size:11px;color:#657d72;line-height:1.5}
+.monthly-pdf-button{background:#216e50;min-height:44px}.monthly-pdf-button:hover:not(:disabled){background:#19583f}
+@media(max-width:700px){.monthly-report-export{flex-direction:column;align-items:stretch;padding:13px}.monthly-pdf-button{width:100%;white-space:normal;text-align:center;line-height:1.45;min-height:50px}}
