@@ -251,8 +251,11 @@ function AppShell() {
       // Fetch directly from Firestore to guarantee the report includes every
       // KP Family, even if the user is currently viewing only one family.
       const source = await loadFailedReportSource(monthId, phase);
-      const count = await downloadFailedStudentsPdf({monthId,phase,...source});
-      showToast(`ดาวน์โหลดรายงานผู้ไม่ผ่าน ${count} คน ครบทุกครอบครัวเรียบร้อย`);
+      const result = await downloadFailedStudentsPdf({monthId,phase,...source});
+      showToast(result.inspected === 0
+        ? 'ดาวน์โหลด PDF แล้ว — ยังไม่มีข้อมูลผลตรวจในเดือนและรอบที่เลือก กรุณาตรวจสอบรอบที่เลือก'
+        : `ดาวน์โหลดรายงานผู้ไม่ผ่าน ${result.failed} คน จากผู้บันทึกผล ${result.inspected} คน ครบทุกครอบครัวเรียบร้อย`,
+        result.inspected === 0 ? 'error' : 'success');
     } catch(error) {
       showToast(error?.code==='permission-denied'
         ? 'ไม่สามารถอ่านรายชื่อทุกครอบครัวเพื่อสร้าง PDF ได้ กรุณา Deploy Firestore Rules เวอร์ชันล่าสุด'

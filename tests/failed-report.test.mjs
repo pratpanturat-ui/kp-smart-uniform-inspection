@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { failedReportRows, failedReportDocument, failedReportFileName, inspectionPhaseLabel } from '../src/utils/failed-report.js';
+import { failedReportRows, failedReportDocument, failedReportFileName, inspectionPhaseLabel, thaiPdfRuns, summarizeInspectionRecords } from '../src/utils/failed-report.js';
+const visibleText = value => Array.isArray(value) ? value.map(run => run.text).join('') : String(value);
 
 const students = [
   {studentId:'a2',name:'นางสาว กวาง',room:'ม.2/1',familyId:'F21',active:false},
@@ -39,24 +40,24 @@ test('historical issue still appears if student is archived or no longer in rost
   const def=failedReportDocument({monthId:'2026-11',phase:2,rows:[row],generatedAt:new Date('2026-11-19T13:00:00Z')});
   assert.equal(def.pageSize,'A4');
   assert.equal(def.pageOrientation,'landscape');
-  assert.equal(def.content[1].text.includes('1 รายการ'),true);
+  assert.equal(visibleText(def.content[1].text).includes('1 รายการ'),true);
 });
 
 test('PDF definition uses Thai labels, total, repeatable header and page count',()=>{
   const rows=failedReportRows(students,families,[{studentId:'a1',status:'issue',familyId:'F01',issueTypes:['hair']}]);
   const def=failedReportDocument({monthId:'2026-11',phase:3,rows,generatedAt:new Date('2026-11-19T13:00:00Z')});
-  assert.match(def.header.stack[1].text,/พฤศจิกายน 2569/);
-  assert.match(def.header.stack[1].text,/รอบสุดท้าย/);
-  assert.match(def.content[0].columns[0].text,/1 คน/);
+  assert.match(visibleText(def.header.stack[1].text),/พฤศจิกายน 2569/);
+  assert.match(visibleText(def.header.stack[1].text),/รอบสุดท้าย/);
+  assert.match(visibleText(def.content[0].columns[0].text),/1 คน/);
   assert.equal(def.content[1].table.headerRows,1);
   assert.equal(def.content[1].table.body.length,2);
-  assert.match(def.footer(2,5).columns[1].text,/2 \/ 5/);
+  assert.match(visibleText(def.footer(2,5).columns[1].text),/2 \/ 5/);
   assert.equal(def.defaultStyle.font,'NotoSansThai');
 });
 
 test('no failures creates a valid zero-record PDF instead of an error',()=>{
   const def=failedReportDocument({monthId:'2026-11',phase:1,rows:[]});
-  assert.match(def.content[1].text,/ไม่มีนักเรียน/);
+  assert.match(visibleText(def.content[1].text),/ยังไม่มีการบันทึกผลตรวจ/);
 });
 
 test('safe stable filenames and clear round descriptions',()=>{
@@ -66,4 +67,24 @@ test('safe stable filenames and clear round descriptions',()=>{
   assert.equal(inspectionPhaseLabel(3),'รอบสุดท้าย');
   assert.throws(()=>failedReportFileName('../not-a-month',1));
   assert.throws(()=>inspectionPhaseLabel(4));
+});
+
+
+test('mixed Thai/Latin text uses an explicit Latin fallback for numbers, year, English IDs and punctuation',()=>{
+  const runs = thaiPdfRuns('รายงาน พฤศจิกายน 2569 | รอบสุดท้าย F01–F21 · “ไม่ผ่าน” 0 คน');
+  assert.equal(runs.map(x=>x.text).join(''), 'รายงาน พฤศจิกายน 2569 | รอบสุดท้าย F01–F21 · “ไม่ผ่าน” 0 คน');
+  for (const run of runs) {
+    assert.equal(run.font, /[\u0E00-\u0E7F]/u.test(run.text) ? 'NotoSansThai' : 'NotoSansLatin');
+    if (run.font==='NotoSansThai') assert.match(run.text,/^[\u0E00-\u0E7F]+$/u);
+  }
+  assert.ok(runs.some(run=>run.font==='NotoSansLatin'&&run.text.includes('2569')));
+  assert.ok(runs.some(run=>run.font==='NotoSansLatin'&&run.text.includes('F01')));
+});
+
+test('zero failed students distinguishes no recorded inspections from all-pass inspections',()=>{
+  const none=failedReportDocument({monthId:'2026-11',phase:3,rows:[],summary:summarizeInspectionRecords([])});
+  assert.match(visibleText(none.content[1].text),/ยังไม่มีการบันทึกผลตรวจ/);
+  const passes=failedReportDocument({monthId:'2026-11',phase:3,rows:[],summary:summarizeInspectionRecords([{status:'pass'},{status:'not_checked'}])});
+  assert.match(visibleText(passes.content[1].text),/ตรวจแล้ว แต่ไม่มีนักเรียนที่มีผลตรวจ/);
+  assert.match(visibleText(passes.content[0].columns[1].text),/บันทึกผลตรวจ 2 คน/);
 });
